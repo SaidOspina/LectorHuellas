@@ -7,7 +7,9 @@ const appState = {
     materias: [],
     estudiantes: [],
     materiaSeleccionada: null,
-    arduinoConectado: false
+    arduinoConectado: false,
+    arduinoReady: false,
+    socketConnected: false
 };
 
 // Elementos del DOM
@@ -92,10 +94,35 @@ function initializeSocket() {
         updateArduinoStatus(data.connected, data.ready);
     });
     
-    // Eventos de huella digital
+    // Eventos de huella digital - CORREGIDO
     socket.on('fingerprint-scan', (data) => {
         console.log('👆 Huella escaneada:', data);
         handleFingerprintScan(data);
+    });
+    
+    // Eventos de progreso de huella (para registro de estudiantes)
+    socket.on('huella-progress', (data) => {
+        console.log('🔄 Progreso de huella:', data);
+        // Estos eventos se manejan específicamente en estudiantes.js
+        if (window.registroHuellaEnProgreso) {
+            console.log('Delegando evento huella-progress a estudiantes.js');
+        }
+    });
+    
+    socket.on('huella-registered', (data) => {
+        console.log('✅ Huella registrada:', data);
+        // Estos eventos se manejan específicamente en estudiantes.js
+        if (window.registroHuellaEnProgreso) {
+            console.log('Delegando evento huella-registered a estudiantes.js');
+        }
+    });
+    
+    socket.on('huella-error', (data) => {
+        console.log('❌ Error de huella:', data);
+        // Estos eventos se manejan específicamente en estudiantes.js
+        if (window.registroHuellaEnProgreso) {
+            console.log('Delegando evento huella-error a estudiantes.js');
+        }
     });
     
     // Eventos de asistencia
@@ -245,33 +272,45 @@ function updateArduinoStatus(connected, ready = false) {
     }
 }
 
-// ====== MANEJO DE EVENTOS DE HUELLA ======
+// ====== MANEJO DE EVENTOS DE HUELLA - CORREGIDO ======
 function handleFingerprintScan(data) {
     const huellaID = data.id;
     console.log(`👆 Procesando huella escaneada ID: ${huellaID}`);
     
-    // Verificar si hay un proceso de registro de huella en curso (estudiantes.js)
+    // 1. Verificar si hay un proceso de registro de huella en curso (estudiantes.js)
     if (window.registroHuellaEnProgreso) {
         console.log('🔄 Proceso de registro de huella en curso, delegando a estudiantes.js...');
         return; // Los eventos específicos de huella se manejan en estudiantes.js
     }
     
-    // CORRECCIÓN: Verificar correctamente el proceso de asistencia por huella
-    if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual) {
-        console.log('📝 Proceso de asistencia por huella en curso, delegando a asistencia.js...');
+    // 2. Verificar si hay un proceso de asistencia por huella en curso
+    if (window.asistenciaPorHuellaEnProgreso) {
+        console.log('📝 Proceso de asistencia por huella en curso, procesando...');
+        
+        // Llamar directamente a la función global
         if (typeof window.handleAsistenciaHuella === 'function') {
             window.handleAsistenciaHuella(huellaID);
-        } else if (typeof handleAsistenciaHuella === 'function') {
-            handleAsistenciaHuella(huellaID);
         } else {
-            console.error('❌ Función handleAsistenciaHuella no encontrada');
+            console.error('❌ Función window.handleAsistenciaHuella no encontrada');
+            console.log('Funciones disponibles:', Object.keys(window).filter(key => key.includes('Asistencia')));
         }
         return;
     }
     
-    // Si no hay procesos activos, mostrar información
+    // 3. Si no hay procesos activos, mostrar información
     console.log('ℹ️ Huella detectada sin proceso activo');
-    showAlert(`Huella detectada (ID: ${huellaID}). No hay procesos activos.`, 'info');
+    
+    // Intentar buscar el estudiante con esa huella para mostrar información
+    if (appState.estudiantes && appState.estudiantes.length > 0) {
+        const estudiante = appState.estudiantes.find(est => est.huellaID === huellaID);
+        if (estudiante) {
+            showAlert(`Huella detectada: ${estudiante.nombre} (ID: ${huellaID}). No hay procesos activos.`, 'info');
+        } else {
+            showAlert(`Huella detectada (ID: ${huellaID}). Estudiante no encontrado.`, 'warning');
+        }
+    } else {
+        showAlert(`Huella detectada (ID: ${huellaID}). No hay procesos activos.`, 'info');
+    }
 }
 
 // ====== CARGA DE DATOS INICIALES ======
@@ -283,6 +322,15 @@ function loadInitialData() {
         loadMaterias();
     } else {
         console.warn('⚠️ Función loadMaterias no está disponible');
+    }
+    
+    // Cargar estudiantes para tenerlos disponibles
+    if (typeof loadEstudiantes === 'function') {
+        setTimeout(() => {
+            loadEstudiantes();
+        }, 500);
+    } else {
+        console.warn('⚠️ Función loadEstudiantes no está disponible');
     }
 }
 
@@ -424,6 +472,25 @@ function isSocketConnected() {
     return currentSocket && currentSocket.connected;
 }
 
+// ====== FUNCIONES DE DEBUG ======
+function debugAppState() {
+    console.log('=== DEBUG ESTADO APLICACIÓN ===');
+    console.log('Estado global:', appState);
+    console.log('Socket conectado:', isSocketConnected());
+    console.log('Variables globales importantes:', {
+        registroHuellaEnProgreso: window.registroHuellaEnProgreso,
+        asistenciaPorHuellaEnProgreso: window.asistenciaPorHuellaEnProgreso,
+        materiaAsistenciaActual: window.materiaAsistenciaActual
+    });
+    console.log('Funciones disponibles:', {
+        loadMaterias: typeof loadMaterias,
+        loadEstudiantes: typeof loadEstudiantes,
+        loadAsistenciaData: typeof loadAsistenciaData,
+        handleAsistenciaHuella: typeof window.handleAsistenciaHuella
+    });
+    console.log('===============================');
+}
+
 // ====== MANEJO DE ERRORES GLOBALES ======
 window.addEventListener('error', (event) => {
     console.error('❌ Error global capturado:', event.error);
@@ -447,6 +514,7 @@ window.appUtils = {
     showAlert,
     formatDate,
     confirmAction,
+    debugAppState,
     
     // Socket
     getSocket,
@@ -483,7 +551,10 @@ window.appUtils = {
     
     // Arduino
     checkArduinoStatus,
-    updateArduinoStatus
+    updateArduinoStatus,
+    
+    // Manejo de huellas
+    handleFingerprintScan
 };
 
 // Evento personalizado para cuando la app esté completamente lista
@@ -498,5 +569,8 @@ window.addEventListener('load', () => {
         console.log('🎉 Aplicación completamente cargada y lista');
     }, 1500);
 });
+
+// Exponer función de debug globalmente
+window.debugAppState = debugAppState;
 
 console.log('📱 app.js cargado correctamente');

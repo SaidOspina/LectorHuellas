@@ -405,7 +405,7 @@ function toggleMetodoRegistroAsistencia() {
     const usarHuella = asistenciaElements.metodoHuella && asistenciaElements.metodoHuella.checked;
     
     if (usarHuella) {
-        console.log('📱 Modo: Registro por huella');
+        console.log('📱 Modo: Registro por huella continuo');
         
         // Mostrar interfaz de huella
         asistenciaElements.registroHuellaContainer.classList.remove('d-none');
@@ -414,15 +414,24 @@ function toggleMetodoRegistroAsistencia() {
         
         // Verificar que se haya seleccionado una materia antes de iniciar
         if (asistenciaElements.asistenciaModalMateria.value) {
+            console.log('Iniciando proceso de huella continuo con materia seleccionada');
             iniciarRegistroAsistenciaPorHuella();
         } else {
+            console.log('Esperando selección de materia');
             if (asistenciaElements.huellaAsistenciaStatus) {
-                asistenciaElements.huellaAsistenciaStatus.textContent = 'Seleccione una materia primero...';
-                asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-warning';
+                asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                    <div class="d-flex align-items-center justify-content-center text-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span>Seleccione una materia primero...</span>
+                    </div>
+                `;
             }
         }
     } else {
         console.log('✍️ Modo: Registro manual');
+        
+        // Detener escaneo continuo
+        detenerEscaneoContinuo();
         
         // Mostrar interfaz manual
         asistenciaElements.registroHuellaContainer.classList.add('d-none');
@@ -431,14 +440,9 @@ function toggleMetodoRegistroAsistencia() {
         
         // Cargar estudiantes para selección manual
         cargarEstudiantesParaAsistencia();
-        
-        // Cancelar proceso de huella si estaba en progreso
-        if (window.asistenciaPorHuellaEnProgreso) {
-            window.asistenciaPorHuellaEnProgreso = false;
-            window.materiaAsistenciaActual = null;
-        }
     }
 }
+
 
 function setupModalEvents() {
     // Evento para cambio de materia - reiniciar proceso de huella
@@ -449,18 +453,24 @@ function setupModalEvents() {
             // Si estamos en modo huella, reiniciar el proceso
             if (asistenciaElements.metodoHuella && asistenciaElements.metodoHuella.checked) {
                 if (asistenciaElements.asistenciaModalMateria.value) {
+                    // Detener proceso actual
+                    detenerEscaneoContinuo();
+                    
                     // Reiniciar proceso con nueva materia
-                    window.asistenciaPorHuellaEnProgreso = false;
                     setTimeout(() => {
                         iniciarRegistroAsistenciaPorHuella();
                     }, 500);
                 } else {
                     // Detener proceso si no hay materia seleccionada
-                    window.asistenciaPorHuellaEnProgreso = false;
-                    window.materiaAsistenciaActual = null;
+                    detenerEscaneoContinuo();
+                    
                     if (asistenciaElements.huellaAsistenciaStatus) {
-                        asistenciaElements.huellaAsistenciaStatus.textContent = 'Seleccione una materia...';
-                        asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-muted';
+                        asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                            <div class="d-flex align-items-center justify-content-center text-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <span>Seleccione una materia...</span>
+                            </div>
+                        `;
                     }
                 }
             }
@@ -475,11 +485,20 @@ function setupModalEvents() {
     if (modalElement) {
         modalElement.addEventListener('hidden.bs.modal', () => {
             console.log('🚪 Modal de asistencia cerrado - limpiando estado');
-            window.asistenciaPorHuellaEnProgreso = false;
-            window.materiaAsistenciaActual = null;
+            detenerEscaneoContinuo();
+        });
+        
+        // Evento para cuando se abra el modal
+        modalElement.addEventListener('shown.bs.modal', () => {
+            console.log('🚪 Modal de asistencia abierto');
+            modalAsistenciaAbierto = true;
         });
     }
 }
+
+let scanTimeoutId = null;
+let scanIntervalId = null;
+let modalAsistenciaAbierto = false;
 
 // Iniciar proceso de registro de asistencia por huella
 function iniciarRegistroAsistenciaPorHuella() {
@@ -487,50 +506,218 @@ function iniciarRegistroAsistenciaPorHuella() {
     
     // Verificar si el Arduino está conectado
     if (!window.appUtils.appState.arduinoConectado || !window.appUtils.appState.arduinoReady) {
+        if (asistenciaElements.huellaAsistenciaStatus) {
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex align-items-center justify-content-center text-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <span>Arduino no conectado</span>
+                </div>
+            `;
+        }
         window.appUtils.showAlert('El Arduino no está conectado o no está listo. Verifique la conexión.', 'danger');
         return;
     }
     
     // Verificar si hay una materia seleccionada
     if (!asistenciaElements.asistenciaModalMateria.value) {
-        window.appUtils.showAlert('Debe seleccionar una materia antes de registrar asistencia.', 'warning');
+        if (asistenciaElements.huellaAsistenciaStatus) {
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex align-items-center justify-content-center text-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <span>Seleccione una materia primero</span>
+                </div>
+            `;
+        }
         return;
     }
     
-    // Guardar materia seleccionada
-    window.materiaAsistenciaActual = asistenciaElements.asistenciaModalMateria.value;
+    // Guardar materia seleccionada en variables locales y globales
+    materiaAsistenciaActual = asistenciaElements.asistenciaModalMateria.value;
+    window.materiaAsistenciaActual = materiaAsistenciaActual;
     
-    // Marcar como en progreso
+    // Marcar como en progreso en variables locales y globales
+    asistenciaPorHuellaEnProgreso = true;
     window.asistenciaPorHuellaEnProgreso = true;
+    modalAsistenciaAbierto = true;
     
-    // Actualizar mensaje
-    if (asistenciaElements.huellaAsistenciaStatus) {
-        asistenciaElements.huellaAsistenciaStatus.textContent = 'Coloque el dedo en el lector...';
-        asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-primary';
+    console.log('🎯 Variables establecidas:', {
+        local: asistenciaPorHuellaEnProgreso,
+        global: window.asistenciaPorHuellaEnProgreso,
+        materia: materiaAsistenciaActual
+    });
+    
+    // Iniciar ciclo de escaneo continuo
+    iniciarCicloEscaneoContinuo();
+}
+
+function iniciarCicloEscaneoContinuo() {
+    // Limpiar timeouts/intervals anteriores
+    if (scanTimeoutId) {
+        clearTimeout(scanTimeoutId);
+        scanTimeoutId = null;
+    }
+    if (scanIntervalId) {
+        clearInterval(scanIntervalId);
+        scanIntervalId = null;
     }
     
-    // Enviar comando para escanear huella
-    fetch(`${window.appUtils.API_URL}/arduino/command`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ command: 'scan' })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (!data.success) {
-            throw new Error(data.error || 'Error al iniciar escaneo');
+    // Función para enviar comando de escaneo
+    const enviarComandoScan = () => {
+        if (!modalAsistenciaAbierto || !asistenciaPorHuellaEnProgreso) {
+            console.log('🛑 Deteniendo escaneo continuo - modal cerrado o proceso cancelado');
+            return;
         }
-        console.log('✅ Comando de escaneo enviado correctamente');
-    })
-    .catch(error => {
-        console.error('Error al iniciar escaneo de huella:', error);
-        window.appUtils.showAlert('Error al comunicarse con el Arduino', 'danger');
-        window.asistenciaPorHuellaEnProgreso = false;
-        window.materiaAsistenciaActual = null;
-    });
+        
+        console.log('📡 Enviando comando scan...');
+        
+        // Actualizar estado visual
+        actualizarEstadoEscaneo('escaneando');
+        
+        fetch(`${window.appUtils.API_URL}/arduino/command`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ command: 'scan' })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Error al iniciar escaneo');
+            }
+            console.log('✅ Comando de escaneo enviado correctamente');
+        })
+        .catch(error => {
+            console.error('Error al enviar comando scan:', error);
+            actualizarEstadoEscaneo('error', error.message);
+        });
+    };
+    
+    // Enviar primer comando inmediatamente
+    enviarComandoScan();
+    
+    // Configurar envío cada 15 segundos
+    scanIntervalId = setInterval(() => {
+        if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
+            enviarComandoScan();
+        } else {
+            // Limpiar interval si el modal se cerró
+            clearInterval(scanIntervalId);
+            scanIntervalId = null;
+        }
+    }, 5000); // Cada 15 segundos
 }
+
+function actualizarEstadoEscaneo(estado, mensaje = '') {
+    if (!asistenciaElements.huellaAsistenciaStatus) return;
+    
+    const tiempoActual = new Date().toLocaleTimeString();
+    
+    switch (estado) {
+        case 'escaneando':
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center text-primary">
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="spinner-border spinner-border-sm me-2" role="status">
+                            <span class="visually-hidden">Cargando...</span>
+                        </div>
+                        <span class="fw-bold">Esperando huella digital...</span>
+                    </div>
+                    <small class="text-muted">
+                        <i class="bi bi-clock me-1"></i>
+                        Último escaneo: ${tiempoActual}
+                    </small>
+                    <small class="text-info mt-1">
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        Escaneo automático cada 15 segundos
+                    </small>
+                </div>
+            `;
+            break;
+            
+        case 'procesando':
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center text-primary">
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="spinner-border spinner-border-sm me-2" role="status">
+                            <span class="visually-hidden">Cargando...</span>
+                        </div>
+                        <span class="fw-bold">Procesando huella...</span>
+                    </div>
+                    <small class="text-muted">
+                        ${mensaje || 'Verificando en la base de datos...'}
+                    </small>
+                </div>
+            `;
+            break;
+            
+        case 'exito':
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center text-success">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span class="fw-bold">${mensaje}</span>
+                    </div>
+                    <small class="text-muted">
+                        Continuando escaneo automático...
+                    </small>
+                </div>
+            `;
+            break;
+            
+        case 'error':
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center text-danger">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span class="fw-bold">Error de comunicación</span>
+                    </div>
+                    <small class="text-muted">
+                        ${mensaje || 'Reintentando automáticamente...'}
+                    </small>
+                </div>
+            `;
+            break;
+            
+        case 'duplicado':
+            asistenciaElements.huellaAsistenciaStatus.innerHTML = `
+                <div class="d-flex flex-column align-items-center justify-content-center text-warning">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <span class="fw-bold">${mensaje}</span>
+                    </div>
+                    <small class="text-muted">
+                        Continuando escaneo para otros estudiantes...
+                    </small>
+                </div>
+            `;
+            break;
+    }
+}
+
+function detenerEscaneoContinuo() {
+    console.log('🛑 Deteniendo escaneo continuo...');
+    
+    // Limpiar timeouts e intervals
+    if (scanTimeoutId) {
+        clearTimeout(scanTimeoutId);
+        scanTimeoutId = null;
+    }
+    if (scanIntervalId) {
+        clearInterval(scanIntervalId);
+        scanIntervalId = null;
+    }
+    
+    // Limpiar variables de estado
+    asistenciaPorHuellaEnProgreso = false;
+    materiaAsistenciaActual = null;
+    window.asistenciaPorHuellaEnProgreso = false;
+    window.materiaAsistenciaActual = null;
+    modalAsistenciaAbierto = false;
+    
+    console.log('✅ Escaneo continuo detenido y variables limpiadas');
+}
+
 
 
 // Cargar estudiantes para selector en modal de asistencia
@@ -632,17 +819,23 @@ function guardarAsistenciaManual() {
 // Manejar registro de asistencia por huella
 function handleRegistroAsistenciaPorHuella(huellaID) {
     console.log(`👆 Procesando huella ${huellaID} para asistencia`);
+    console.log('Estado actual:', {
+        local: asistenciaPorHuellaEnProgreso,
+        global: window.asistenciaPorHuellaEnProgreso,
+        materia: materiaAsistenciaActual || window.materiaAsistenciaActual
+    });
     
-    if (!window.asistenciaPorHuellaEnProgreso || !window.materiaAsistenciaActual) {
+    // Verificar estado usando variables locales o globales
+    const enProgreso = asistenciaPorHuellaEnProgreso || window.asistenciaPorHuellaEnProgreso;
+    const materia = materiaAsistenciaActual || window.materiaAsistenciaActual;
+    
+    if (!enProgreso || !materia) {
         console.log('❌ No hay proceso de asistencia por huella en curso');
         return;
     }
     
     // Actualizar mensaje de estado
-    if (asistenciaElements.huellaAsistenciaStatus) {
-        asistenciaElements.huellaAsistenciaStatus.textContent = 'Procesando huella...';
-        asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-primary';
-    }
+    actualizarEstadoEscaneo('procesando', `ID de huella: ${huellaID}`);
     
     // Enviar solicitud de registro por huella
     fetch(`${window.appUtils.API_URL}/asistencia/huella`, {
@@ -652,7 +845,7 @@ function handleRegistroAsistenciaPorHuella(huellaID) {
         },
         body: JSON.stringify({
             huellaID,
-            materia: window.materiaAsistenciaActual
+            materia
         })
     })
     .then(response => {
@@ -664,47 +857,66 @@ function handleRegistroAsistenciaPorHuella(huellaID) {
         return response.json();
     })
     .then(data => {
-        // Marcar como exitoso
-        if (asistenciaElements.huellaAsistenciaStatus) {
-            asistenciaElements.huellaAsistenciaStatus.textContent = `¡Asistencia registrada para ${data.asistencia.estudiante.nombre}!`;
-            asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-success';
-        }
+        console.log('✅ Respuesta del servidor:', data);
         
-        // Mostrar alerta de éxito
-        window.appUtils.showAlert(`✅ Asistencia registrada para ${data.asistencia.estudiante.nombre}`, 'success');
+        // Determinar el tipo de mensaje según la respuesta
+        let mensajeExito, alertaTipo;
+        
+        if (data.mensaje && data.mensaje.includes('ya registrada')) {
+            // Caso de asistencia ya registrada
+            mensajeExito = `${data.asistencia.estudiante.nombre} ya tiene asistencia registrada`;
+            alertaTipo = 'info';
+            actualizarEstadoEscaneo('duplicado', mensajeExito);
+            window.appUtils.showAlert(`ℹ️ ${mensajeExito}`, alertaTipo);
+        } else {
+            // Caso de nueva asistencia
+            mensajeExito = `¡Asistencia registrada para ${data.asistencia.estudiante.nombre}!`;
+            alertaTipo = 'success';
+            actualizarEstadoEscaneo('exito', mensajeExito);
+            window.appUtils.showAlert(`✅ ${mensajeExito}`, alertaTipo);
+        }
         
         // Recargar registros de asistencia
         cargarRegistrosAsistencia();
         
-        // Reiniciar proceso después de un tiempo
+        // Volver al estado de escaneo después de 3 segundos
         setTimeout(() => {
-            if (asistenciaElements.modalAsistencia._element && 
-                asistenciaElements.modalAsistencia._element.classList.contains('show')) {
-                iniciarRegistroAsistenciaPorHuella();
+            if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
+                actualizarEstadoEscaneo('escaneando');
             }
         }, 3000);
     })
     .catch(error => {
         console.error('Error al registrar asistencia por huella:', error);
         
-        // Mostrar error en el modal
-        if (asistenciaElements.huellaAsistenciaStatus) {
-            asistenciaElements.huellaAsistenciaStatus.textContent = error.message;
-            asistenciaElements.huellaAsistenciaStatus.className = 'mt-3 text-danger';
+        // Determinar el tipo de error y mostrar mensaje apropiado
+        let mensajeError = error.message;
+        let tipoError = 'warning';
+        
+        // Casos especiales de error
+        if (error.message.includes('no está inscrito')) {
+            mensajeError = 'Estudiante no inscrito en esta materia';
+            tipoError = 'warning';
+        } else if (error.message.includes('no encontró')) {
+            mensajeError = 'Huella no registrada en el sistema';
+            tipoError = 'info';
+        } else {
+            tipoError = 'danger';
         }
         
-        // Mostrar alerta de error
-        window.appUtils.showAlert(`❌ ${error.message}`, 'danger');
+        // Mostrar error temporalmente
+        actualizarEstadoEscaneo('duplicado', mensajeError);
+        window.appUtils.showAlert(`❌ ${mensajeError}`, tipoError);
         
-        // Reiniciar proceso después de un tiempo
+        // Volver al estado de escaneo después de 3 segundos
         setTimeout(() => {
-            if (asistenciaElements.modalAsistencia._element && 
-                asistenciaElements.modalAsistencia._element.classList.contains('show')) {
-                iniciarRegistroAsistenciaPorHuella();
+            if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
+                actualizarEstadoEscaneo('escaneando');
             }
         }, 3000);
     });
 }
+
 
 // Cambiar estado de un registro de asistencia
 function cambiarEstadoAsistencia(registro) {
