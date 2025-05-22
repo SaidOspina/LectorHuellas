@@ -33,6 +33,7 @@ let arduinoParser;
 let arduinoReady = false;
 let commandQueue = [];
 let processingCommand = false;
+let waitingForScanResponse = false;
 
 // Función para procesar la cola de comandos
 function processCommandQueue() {
@@ -52,20 +53,28 @@ function processCommandQueue() {
     return;
   }
   
+  // Marcar si estamos esperando respuesta de scan
+  if (command === 'scan') {
+    waitingForScanResponse = true;
+    console.log('🔍 Marcando como esperando respuesta de scan');
+  }
+  
   arduinoPort.write(command + '\n', (err) => {
     if (err) {
       console.error('Error al enviar comando:', err);
       processingCommand = false;
+      waitingForScanResponse = false;
       processCommandQueue();
     }
   });
   
   // Timeout para comandos (más tiempo para enroll)
-  const timeoutDuration = command.startsWith('enroll:') ? 120000 : 15000; // 2 minutos para registro, 15 segundos para otros
+  const timeoutDuration = command.startsWith('enroll:') ? 120000 : 15000;
   setTimeout(() => {
     if (processingCommand) {
       console.log('Timeout en comando, continuando...');
       processingCommand = false;
+      waitingForScanResponse = false;
       processCommandQueue();
     }
   }, timeoutDuration);
@@ -73,7 +82,6 @@ function processCommandQueue() {
 
 // Función para inicializar la conexión con Arduino
 function initArduinoConnection() {
-  // Obtener el puerto configurado
   const portPath = process.env.ARDUINO_PORT;
   
   if (!portPath) {
@@ -84,249 +92,257 @@ function initArduinoConnection() {
   try {
     console.log(`Intentando conectar con Arduino en puerto ${portPath}...`);
     
-    // Creación de la instancia de SerialPort
     arduinoPort = new SerialPort({
       path: portPath,
       baudRate: 9600,
       autoOpen: true
     });
     
-    // Crear el parser
     arduinoParser = new ReadlineParser({ delimiter: '\n' });
     arduinoPort.pipe(arduinoParser);
 
-    // Evento cuando se abre la conexión
     arduinoPort.on('open', () => {
       console.log(`Conexión establecida con Arduino en ${portPath}`);
       global.arduinoConectado = true;
-      arduinoReady = false; // Esperar a que el Arduino esté listo
+      arduinoReady = false;
       
-      // Timeout de seguridad para marcar Arduino como listo
       setTimeout(() => {
         if (!arduinoReady) {
           arduinoReady = true;
           console.log('Arduino marcado como listo (timeout de seguridad)');
           processCommandQueue();
         }
-      }, 5000); // 5 segundos de timeout
+      }, 5000);
       
-      // Emitir evento de conexión a todos los clientes
       if (global.io) {
         global.io.emit('arduino-status', { connected: true, ready: arduinoReady });
       }
     });
 
-    // Evento de error
     arduinoPort.on('error', (err) => {
       console.error('Error en la conexión con Arduino:', err.message);
       global.arduinoConectado = false;
       arduinoReady = false;
+      waitingForScanResponse = false;
       
-      // Emitir evento de error a todos los clientes
       if (global.io) {
         global.io.emit('arduino-status', { connected: false, ready: false });
       }
     });
 
-    // Evento cuando se cierra la conexión
     arduinoPort.on('close', () => {
       console.log('Conexión con Arduino cerrada');
       global.arduinoConectado = false;
       arduinoReady = false;
+      waitingForScanResponse = false;
       
-      // Limpiar cola de comandos
       commandQueue = [];
       processingCommand = false;
       
-      // Emitir evento de desconexión a todos los clientes
       if (global.io) {
         global.io.emit('arduino-status', { connected: false, ready: false });
       }
     });
 
-        // Procesar datos recibidos desde Arduino
-        arduinoParser.on('data', (data) => {
-        const cleanData = data.trim();
-        console.log(`Datos recibidos de Arduino: ${cleanData}`);
-        
-        // Verificar si el Arduino está listo
-        if (cleanData.includes('Sistema listo') || 
-            cleanData.includes('Sin sensor - modo prueba') ||
-            cleanData === 'READY' ||
-            cleanData.includes('Iniciando...')) {
-            
-            if (!arduinoReady) {
-                arduinoReady = true;
-                console.log('✅ Arduino está listo para recibir comandos');
-                
-                // Emitir actualización de estado
-                if (global.io) {
-                    global.io.emit('arduino-status', { 
-                        connected: true, 
-                        ready: true,
-                        sensorMode: cleanData.includes('Sin sensor') ? 'test' : 'normal'
-                    });
-                }
-                
-                processCommandQueue();
-            }
-        }
-        
-        // CORRECCIÓN: Procesar respuestas de comandos de escaneo
-        if (cleanData.startsWith('ID#')) {
-            const fingerprintId = parseInt(cleanData.substring(3));
-            console.log(`👆 Huella detectada con ID: ${fingerprintId}`);
-            
-            // Emitir evento de huella escaneada
-            if (global.io) {
-                global.io.emit('fingerprint-scan', { 
-                    id: fingerprintId,
-                    timestamp: new Date().toISOString()
-                });
-            }
-            
-            // Marcar comando como procesado
-            processingCommand = false;
-            processCommandQueue();
-        }
-        
-        // Procesar errores de escaneo
-        else if (cleanData.startsWith('ERROR: No leido') || cleanData === 'ERROR: Sin sensor') {
-            console.log('❌ Error en escaneo de huella:', cleanData);
-            
-            // Emitir evento de error de huella
-            if (global.io) {
-                global.io.emit('fingerprint-error', { 
-                    message: cleanData.replace('ERROR:', '').trim(),
-                    timestamp: new Date().toISOString()
-                });
-            }
-            
-            processingCommand = false;
-            processCommandQueue();
-        }
-        
-        // NUEVO: Manejar mensajes de progreso del registro de huella
-        if (cleanData.includes('Registrando ID') || cleanData.startsWith('Registrando ID')) {
-            console.log('🔄 Iniciando proceso de registro de huella');
-            if (global.io) {
-                global.io.emit('huella-progress', { 
-                    step: 'iniciando',
-                    message: cleanData
-                });
-            }
-        }
-        
-        else if (cleanData.includes('Coloque dedo') || cleanData.includes('coloque dedo') || 
-                cleanData.includes('Coloque su dedo') || cleanData.includes('Place finger')) {
-            console.log('📱 Solicitando primera captura de huella');
-            if (global.io) {
-                global.io.emit('huella-progress', { 
-                    step: 'primera_captura',
-                    message: cleanData
-                });
-            }
-        }
-        
-        else if (cleanData.includes('Retire dedo') || cleanData.includes('retire dedo') || 
-                cleanData.includes('Remove finger') || cleanData.includes('Levante dedo')) {
-            console.log('✋ Solicitando retirar el dedo');
-            if (global.io) {
-                global.io.emit('huella-progress', { 
-                    step: 'retirar',
-                    message: cleanData
-                });
-            }
-        }
-        
-        else if (cleanData.includes('Mismo dedo otra vez') || cleanData.includes('mismo dedo') || 
-                cleanData.includes('Place same finger again') || cleanData.includes('otra vez')) {
-            console.log('🔄 Solicitando segunda captura de huella');
-            if (global.io) {
-                global.io.emit('huella-progress', { 
-                    step: 'segunda_captura',
-                    message: cleanData
-                });
-            }
-        }
-        
-        else if (cleanData.includes('Procesando') || cleanData.includes('Processing') || 
-                cleanData.includes('Creando modelo') || cleanData.includes('Creating model')) {
-            console.log('⚙️ Procesando huella');
-            if (global.io) {
-                global.io.emit('huella-progress', { 
-                    step: 'procesando',
-                    message: cleanData || 'Procesando huella...'
-                });
-            }
-        }
-        
-        // Respuestas de éxito
-        else if (cleanData.startsWith('SUCCESS:')) {
-            console.log('✅ Comando ejecutado exitosamente:', cleanData);
-            
-            // Si es un registro de huella exitoso, extraer el ID
-            if (cleanData.includes('ID')) {
-                const idMatch = cleanData.match(/ID\s*(\d+)/);
-                if (idMatch) {
-                    const huellaID = parseInt(idMatch[1]);
-                    console.log(`🎉 Registro de huella completado con ID: ${huellaID}`);
-                    if (global.io) {
-                        global.io.emit('huella-registered', { 
-                            id: huellaID,
-                            message: `¡Huella registrada exitosamente con ID ${huellaID}!`
-                        });
-                    }
-                }
-            }
-            
-            processingCommand = false;
-            processCommandQueue();
-        }
-        
-        // Respuestas de error
-        else if (cleanData.startsWith('ERROR:')) {
-            console.error('❌ Error del Arduino:', cleanData);
-            
-            // Emitir error de huella si está relacionado
-            if (global.io) {
-                global.io.emit('huella-error', { 
-                    message: cleanData.replace('ERROR:', '').trim() || 'Error en el proceso'
-                });
-            }
-            
-            processingCommand = false;
-            processCommandQueue();
-        }
-        
-        // Respuesta de conteo
-        else if (cleanData.startsWith('COUNT:')) {
-            const countMatch = cleanData.match(/COUNT:\s*(\d+)/);
-            if (countMatch) {
-                const count = parseInt(countMatch[1]);
-                console.log(`📊 Arduino reporta ${count} huellas almacenadas`);
-                if (global.io) {
-                    global.io.emit('arduino-count', { count });
-                }
-            }
-            processingCommand = false;
-            processCommandQueue();
-        }
-        
-        // Otras respuestas que indican fin de comando
-        else if (cleanData.startsWith('DEL:') || 
-            cleanData === 'RESET: OK' ||
-            cleanData.includes('BD limpia') ||
-            cleanData.startsWith('STATUS:')) {
-            processingCommand = false;
-            processCommandQueue();
-        }
+    // PROCESAMIENTO DE DATOS MODIFICADO - Una sola respuesta por scan
+    arduinoParser.on('data', (data) => {
+      const cleanData = data.trim();
+      console.log(`Datos recibidos de Arduino: ${cleanData}`);
+      
+      // Verificar si el Arduino está listo
+      if (cleanData.includes('Sistema listo') || 
+          cleanData.includes('Sin sensor - modo prueba') ||
+          cleanData === 'READY' ||
+          cleanData.includes('Iniciando...')) {
+          
+          if (!arduinoReady) {
+              arduinoReady = true;
+              console.log('✅ Arduino está listo para recibir comandos');
+              
+              if (global.io) {
+                  global.io.emit('arduino-status', { 
+                      connected: true, 
+                      ready: true,
+                      sensorMode: cleanData.includes('Sin sensor') ? 'test' : 'normal'
+                  });
+              }
+              
+              processCommandQueue();
+          }
+      }
+      
+      // PROCESAR RESPUESTAS DE SCAN - SOLO UNA VEZ
+      if (cleanData.startsWith('ID#')) {
+          const fingerprintId = parseInt(cleanData.substring(3));
+          console.log(`👆 Huella detectada con ID: ${fingerprintId}`);
+          
+          // SOLO procesar si estamos esperando una respuesta de scan
+          if (waitingForScanResponse) {
+              console.log('✅ Procesando respuesta de scan válida');
+              waitingForScanResponse = false; // Marcar como procesada
+              
+              // Emitir evento de huella escaneada
+              if (global.io) {
+                  global.io.emit('fingerprint-scan', { 
+                      id: fingerprintId,
+                      timestamp: new Date().toISOString()
+                  });
+              }
+              
+              // Marcar comando como procesado
+              processingCommand = false;
+              processCommandQueue();
+          } else {
+              console.log('⚠️ Respuesta de scan ignorada - no esperada o ya procesada');
+          }
+      }
+      
+      // Procesar errores de escaneo
+      else if (cleanData.startsWith('ERROR: No leido') || cleanData === 'ERROR: Sin sensor') {
+          console.log('❌ Error en escaneo de huella:', cleanData);
+          
+          // SOLO procesar si estamos esperando una respuesta de scan
+          if (waitingForScanResponse) {
+              console.log('✅ Procesando error de scan válido');
+              waitingForScanResponse = false; // Marcar como procesada
+              
+              // Emitir evento de error de huella
+              if (global.io) {
+                  global.io.emit('fingerprint-error', { 
+                      message: cleanData.replace('ERROR:', '').trim(),
+                      timestamp: new Date().toISOString()
+                  });
+              }
+              
+              processingCommand = false;
+              processCommandQueue();
+          } else {
+              console.log('⚠️ Error de scan ignorado - no esperado o ya procesado');
+          }
+      }
+      
+      // Procesar comando de detener scan
+      else if (cleanData === 'SCAN: Detenido' || cleanData === 'SCAN: No activo') {
+          console.log('🛑 Scan detenido por Arduino');
+          waitingForScanResponse = false;
+          processingCommand = false;
+          processCommandQueue();
+      }
+      
+      // Manejar mensajes de progreso del registro de huella
+      else if (cleanData.includes('Registrando ID') || cleanData.startsWith('Registrando ID')) {
+          console.log('🔄 Iniciando proceso de registro de huella');
+          if (global.io) {
+              global.io.emit('huella-progress', { 
+                  step: 'iniciando',
+                  message: cleanData
+              });
+          }
+      }
+      
+      else if (cleanData.includes('Coloque dedo') || cleanData.includes('coloque dedo')) {
+          console.log('📱 Solicitando primera captura de huella');
+          if (global.io) {
+              global.io.emit('huella-progress', { 
+                  step: 'primera_captura',
+                  message: cleanData
+              });
+          }
+      }
+      
+      else if (cleanData.includes('Retire dedo') || cleanData.includes('retire dedo')) {
+          console.log('✋ Solicitando retirar el dedo');
+          if (global.io) {
+              global.io.emit('huella-progress', { 
+                  step: 'retirar',
+                  message: cleanData
+              });
+          }
+      }
+      
+      else if (cleanData.includes('Mismo dedo otra vez') || cleanData.includes('mismo dedo')) {
+          console.log('🔄 Solicitando segunda captura de huella');
+          if (global.io) {
+              global.io.emit('huella-progress', { 
+                  step: 'segunda_captura',
+                  message: cleanData
+              });
+          }
+      }
+      
+      // Respuestas de éxito
+      else if (cleanData.startsWith('SUCCESS:')) {
+          console.log('✅ Comando ejecutado exitosamente:', cleanData);
+          
+          if (cleanData.includes('ID')) {
+              const idMatch = cleanData.match(/ID\s*(\d+)/);
+              if (idMatch) {
+                  const huellaID = parseInt(idMatch[1]);
+                  console.log(`🎉 Registro de huella completado con ID: ${huellaID}`);
+                  if (global.io) {
+                      global.io.emit('huella-registered', { 
+                          id: huellaID,
+                          message: `¡Huella registrada exitosamente con ID ${huellaID}!`
+                      });
+                  }
+              }
+          }
+          
+          processingCommand = false;
+          processCommandQueue();
+      }
+      
+      // Respuestas de error
+      else if (cleanData.startsWith('ERROR:')) {
+          console.error('❌ Error del Arduino:', cleanData);
+          
+          if (global.io) {
+              global.io.emit('huella-error', { 
+                  message: cleanData.replace('ERROR:', '').trim() || 'Error en el proceso'
+              });
+          }
+          
+          processingCommand = false;
+          processCommandQueue();
+      }
+      
+      // Respuesta de conteo
+      else if (cleanData.startsWith('COUNT:')) {
+          const countMatch = cleanData.match(/COUNT:\s*(\d+)/);
+          if (countMatch) {
+              const count = parseInt(countMatch[1]);
+              console.log(`📊 Arduino reporta ${count} huellas almacenadas`);
+              if (global.io) {
+                  global.io.emit('arduino-count', { count });
+              }
+          }
+          processingCommand = false;
+          processCommandQueue();
+      }
+      
+      // Otras respuestas que indican fin de comando
+      else if (cleanData.includes('BD limpia') ||
+               cleanData === 'RESET: OK' ||
+               cleanData.startsWith('STATUS:')) {
+          processingCommand = false;
+          processCommandQueue();
+      }
     });
     
   } catch (error) {
     console.error('Error al inicializar Arduino:', error.message);
   }
 }
+function stopCurrentScan() {
+    if (waitingForScanResponse && arduinoPort && arduinoPort.isOpen) {
+        console.log('🛑 Enviando comando para detener scan en progreso');
+        arduinoPort.write('stop-scan\n');
+        waitingForScanResponse = false;
+        processingCommand = false;
+    }
+}
+
+
 
 // Ruta para enviar comandos a Arduino
 app.post('/api/arduino/command', (req, res) => {
@@ -334,7 +350,6 @@ app.post('/api/arduino/command', (req, res) => {
     
     console.log(`Recibido comando para Arduino: "${command}"`);
     
-    // Verificar si el puerto está definido y abierto
     if (!arduinoPort || !arduinoPort.isOpen) {
         console.log('Error: Arduino no está conectado');
         return res.status(500).json({ 
@@ -358,6 +373,15 @@ app.post('/api/arduino/command', (req, res) => {
         });
     }
     
+    // Si es un comando scan y ya hay uno en progreso, rechazar
+    if (command.trim() === 'scan' && waitingForScanResponse) {
+        console.log('⚠️ Comando scan rechazado - ya hay uno en progreso');
+        return res.status(429).json({ 
+            success: false,
+            error: 'Ya hay un comando scan en progreso' 
+        });
+    }
+    
     // Agregar comando a la cola
     commandQueue.push(command.trim());
     console.log(`Comando agregado a la cola. Cola actual: ${commandQueue.length} comandos`);
@@ -372,6 +396,7 @@ app.post('/api/arduino/command', (req, res) => {
     });
 });
 
+
 // Ruta para obtener estado del Arduino
 app.get('/api/arduino/status', (req, res) => {
     const isConnected = arduinoPort && arduinoPort.isOpen;
@@ -379,9 +404,30 @@ app.get('/api/arduino/status', (req, res) => {
     res.json({ 
         connected: isConnected,
         ready: arduinoReady,
-        queueLength: commandQueue.length
+        queueLength: commandQueue.length,
+        waitingForScan: waitingForScanResponse // NUEVO
     });
 });
+
+// NUEVA RUTA: Detener scan en progreso
+app.post('/api/arduino/stop-scan', (req, res) => {
+    console.log('🛑 Solicitud para detener scan');
+    
+    if (!arduinoPort || !arduinoPort.isOpen) {
+        return res.status(500).json({ 
+            success: false,
+            error: 'Arduino no está conectado' 
+        });
+    }
+    
+    stopCurrentScan();
+    
+    res.json({ 
+        success: true, 
+        message: 'Comando de detener scan enviado' 
+    });
+});
+
 
 // Ruta para reiniciar Arduino
 app.post('/api/arduino/reset', (req, res) => {
@@ -481,6 +527,9 @@ io.on('connection', (socket) => {
 // Manejar cierre de servidor
 process.on('SIGINT', () => {
   console.log('\nCerrando servidor...');
+  
+  // Detener cualquier scan en progreso
+  stopCurrentScan();
   
   if (arduinoPort && arduinoPort.isOpen) {
     console.log('Cerrando conexión con Arduino...');

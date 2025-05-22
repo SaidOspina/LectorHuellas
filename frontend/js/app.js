@@ -1,5 +1,7 @@
 // Configuración y utilidades generales
-const API_URL = '/api';
+const API_URL = process.env.NODE_ENV === 'production' 
+    ? 'https://lectorhuellas.onrender.com'  // URL de Render
+    : '/api'; 
 let socket;
 
 // Estado global de la aplicación

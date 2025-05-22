@@ -182,11 +182,52 @@ function setupSocketEvents() {
         
         console.log('✅ Configurando eventos de socket para asistencia...');
         
-        // Escuchar evento de huella escaneada
+        // Escuchar evento de huella escaneada - CON CONTROL DE DUPLICADOS
         currentSocket.on('fingerprint-scan', (data) => {
-            console.log('🔍 Huella escaneada en asistencia:', data);
-            if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual) {
+            console.log('🔍 Evento fingerprint-scan recibido:', data);
+            
+            // Solo procesar si estamos en modo asistencia por huella Y esperando respuesta
+            if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual && esperandoRespuestaScan) {
+                console.log('✅ Procesando evento de huella válido');
                 handleRegistroAsistenciaPorHuella(data.id);
+            } else {
+                console.log('⚠️ Evento de huella ignorado:', {
+                    asistenciaPorHuellaEnProgreso: window.asistenciaPorHuellaEnProgreso,
+                    materiaAsistenciaActual: window.materiaAsistenciaActual,
+                    esperandoRespuestaScan: esperandoRespuestaScan
+                });
+            }
+        });
+        
+        // Escuchar evento de error de huella - CON CONTROL DE DUPLICADOS
+        currentSocket.on('fingerprint-error', (data) => {
+            console.log('❌ Evento fingerprint-error recibido:', data);
+            
+            // Solo procesar si estamos esperando respuesta
+            if (esperandoRespuestaScan) {
+                console.log('✅ Procesando error de huella válido');
+                esperandoRespuestaScan = false; // Marcar como procesado
+                
+                // Limpiar timeout de seguridad
+                if (scanTimeoutId) {
+                    clearTimeout(scanTimeoutId);
+                    scanTimeoutId = null;
+                }
+                
+                // Mostrar error en la interfaz
+                if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual) {
+                    actualizarEstadoEscaneo('duplicado', data.message || 'Error en la lectura');
+                    window.appUtils.showAlert(`❌ ${data.message || 'Error en la lectura'}`, 'warning');
+                    
+                    // Volver al estado de escaneo después de 3 segundos
+                    setTimeout(() => {
+                        if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
+                            actualizarEstadoEscaneo('escaneando');
+                        }
+                    }, 3000);
+                }
+            } else {
+                console.log('⚠️ Error de huella ignorado - no se esperaba respuesta');
             }
         });
         
@@ -226,6 +267,7 @@ function setupSocketEvents() {
     
     waitForSocket();
 }
+
 
 
 
@@ -688,6 +730,7 @@ function setupModalEvents() {
 let scanTimeoutId = null;
 let scanIntervalId = null;
 let modalAsistenciaAbierto = false;
+let esperandoRespuestaScan = false;
 
 // Iniciar proceso de registro de asistencia por huella
 function iniciarRegistroAsistenciaPorHuella() {
@@ -757,7 +800,14 @@ function iniciarCicloEscaneoContinuo() {
             return;
         }
         
+        // NO enviar nuevo comando si ya estamos esperando respuesta
+        if (esperandoRespuestaScan) {
+            console.log('⏳ Esperando respuesta del scan anterior, saltando este ciclo...');
+            return;
+        }
+        
         console.log('📡 Enviando comando scan...');
+        esperandoRespuestaScan = true; // Marcar como esperando respuesta
         
         // Actualizar estado visual
         actualizarEstadoEscaneo('escaneando');
@@ -775,9 +825,21 @@ function iniciarCicloEscaneoContinuo() {
                 throw new Error(data.error || 'Error al iniciar escaneo');
             }
             console.log('✅ Comando de escaneo enviado correctamente');
+            
+            // Timeout de seguridad para respuesta de scan (15 segundos)
+            scanTimeoutId = setTimeout(() => {
+                if (esperandoRespuestaScan) {
+                    console.log('⏰ Timeout de respuesta de scan');
+                    esperandoRespuestaScan = false;
+                    if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
+                        actualizarEstadoEscaneo('escaneando');
+                    }
+                }
+            }, 15000);
         })
         .catch(error => {
             console.error('Error al enviar comando scan:', error);
+            esperandoRespuestaScan = false;
             actualizarEstadoEscaneo('error', error.message);
         });
     };
@@ -785,7 +847,7 @@ function iniciarCicloEscaneoContinuo() {
     // Enviar primer comando inmediatamente
     enviarComandoScan();
     
-    // Configurar envío cada 15 segundos
+    // Configurar envío cada 20 segundos (más tiempo para dar oportunidad de respuesta)
     scanIntervalId = setInterval(() => {
         if (modalAsistenciaAbierto && asistenciaPorHuellaEnProgreso) {
             enviarComandoScan();
@@ -793,9 +855,11 @@ function iniciarCicloEscaneoContinuo() {
             // Limpiar interval si el modal se cerró
             clearInterval(scanIntervalId);
             scanIntervalId = null;
+            esperandoRespuestaScan = false;
         }
-    }, 5000); // Cada 15 segundos
+    }, 10000); // Cada 10 segundos en lugar de 15
 }
+
 
 function actualizarEstadoEscaneo(estado, mensaje = '') {
     if (!asistenciaElements.huellaAsistenciaStatus) return;
@@ -818,7 +882,7 @@ function actualizarEstadoEscaneo(estado, mensaje = '') {
                     </small>
                     <small class="text-info mt-1">
                         <i class="bi bi-arrow-repeat me-1"></i>
-                        Escaneo automático cada 15 segundos
+                        ${esperandoRespuestaScan ? 'Procesando comando...' : 'Escaneo automático cada 10 segundos'}
                     </small>
                 </div>
             `;
@@ -883,7 +947,6 @@ function actualizarEstadoEscaneo(estado, mensaje = '') {
             break;
     }
 }
-
 function detenerEscaneoContinuo() {
     console.log('🛑 Deteniendo escaneo continuo...');
     
@@ -897,12 +960,31 @@ function detenerEscaneoContinuo() {
         scanIntervalId = null;
     }
     
+    // Si hay un scan en progreso, enviamos comando para detenerlo
+    if (esperandoRespuestaScan) {
+        console.log('📡 Enviando comando para detener scan en progreso...');
+        fetch(`${window.appUtils.API_URL}/arduino/stop-scan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('✅ Comando stop-scan enviado:', data);
+        })
+        .catch(error => {
+            console.error('Error al enviar stop-scan:', error);
+        });
+    }
+    
     // Limpiar variables de estado
     asistenciaPorHuellaEnProgreso = false;
     materiaAsistenciaActual = null;
     window.asistenciaPorHuellaEnProgreso = false;
     window.materiaAsistenciaActual = null;
     modalAsistenciaAbierto = false;
+    esperandoRespuestaScan = false; // IMPORTANTE: Limpiar flag de espera
     
     console.log('✅ Escaneo continuo detenido y variables limpiadas');
 }
@@ -1008,6 +1090,22 @@ function guardarAsistenciaManual() {
 // Manejar registro de asistencia por huella
 function handleRegistroAsistenciaPorHuella(huellaID) {
     console.log(`👆 Procesando huella ${huellaID} para asistencia`);
+    
+    // IMPORTANTE: Solo procesar si estamos esperando una respuesta
+    if (!esperandoRespuestaScan) {
+        console.log('⚠️ Respuesta de huella ignorada - no se esperaba');
+        return;
+    }
+    
+    // Marcar respuesta como recibida INMEDIATAMENTE
+    esperandoRespuestaScan = false;
+    
+    // Limpiar timeout de seguridad
+    if (scanTimeoutId) {
+        clearTimeout(scanTimeoutId);
+        scanTimeoutId = null;
+    }
+    
     console.log('Estado actual:', {
         local: asistenciaPorHuellaEnProgreso,
         global: window.asistenciaPorHuellaEnProgreso,
@@ -1051,7 +1149,7 @@ function handleRegistroAsistenciaPorHuella(huellaID) {
         // Determinar el tipo de mensaje según la respuesta
         let mensajeExito, alertaTipo;
         
-        if (data.mensaje && data.mensaje.includes('ya registrada')) {
+        if (data.mensaje && (data.mensaje.includes('ya registrada') || data.duplicado)) {
             // Caso de asistencia ya registrada
             mensajeExito = `${data.asistencia.estudiante.nombre} ya tiene asistencia registrada`;
             alertaTipo = 'info';
@@ -1902,11 +2000,15 @@ function agregarBotonLimpiarFiltros() {
     }
 }
 
+
+
 // Agregar funciones al objeto global
 window.handleAsistenciaHuella = handleRegistroAsistenciaPorHuella;
+window.detenerEscaneoContinuo = detenerEscaneoContinuo;
 window.asistenciaFunctions = {
     ...window.asistenciaFunctions,
     handleRegistroAsistenciaPorHuella,
     iniciarRegistroAsistenciaPorHuella,
     toggleMetodoRegistroAsistencia
 };
+
