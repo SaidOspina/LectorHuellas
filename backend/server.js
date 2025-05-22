@@ -60,14 +60,15 @@ function processCommandQueue() {
     }
   });
   
-  // Timeout para comandos
+  // Timeout para comandos (más tiempo para enroll)
+  const timeoutDuration = command.startsWith('enroll:') ? 120000 : 15000; // 2 minutos para registro, 15 segundos para otros
   setTimeout(() => {
     if (processingCommand) {
       console.log('Timeout en comando, continuando...');
       processingCommand = false;
       processCommandQueue();
     }
-  }, 15000); // 15 segundos timeout
+  }, timeoutDuration);
 }
 
 // Función para inicializar la conexión con Arduino
@@ -182,22 +183,106 @@ function initArduinoConnection() {
         processCommandQueue();
       }
       
+      // NUEVO: Manejar mensajes de progreso del registro de huella
+      if (cleanData.includes('Registrando ID') || cleanData.startsWith('Registrando ID')) {
+        console.log('Iniciando proceso de registro de huella');
+        if (global.io) {
+          global.io.emit('huella-progress', { 
+            step: 'iniciando',
+            message: cleanData // Usar el mensaje exacto del Arduino
+          });
+        }
+        // NO marcar como terminado aquí, el proceso continúa
+      }
+      
+      else if (cleanData.includes('Coloque dedo') || cleanData.includes('coloque dedo') || 
+               cleanData.includes('Coloque su dedo') || cleanData.includes('Place finger')) {
+        console.log('Solicitando primera captura de huella');
+        if (global.io) {
+          global.io.emit('huella-progress', { 
+            step: 'primera_captura',
+            message: cleanData // Usar el mensaje exacto del Arduino
+          });
+        }
+        // NO marcar como terminado aquí, el proceso continúa
+      }
+      
+      else if (cleanData.includes('Retire dedo') || cleanData.includes('retire dedo') || 
+               cleanData.includes('Remove finger') || cleanData.includes('Levante dedo')) {
+        console.log('Solicitando retirar el dedo');
+        if (global.io) {
+          global.io.emit('huella-progress', { 
+            step: 'retirar',
+            message: cleanData // Usar el mensaje exacto del Arduino
+          });
+        }
+        // NO marcar como terminado aquí, el proceso continúa
+      }
+      
+      else if (cleanData.includes('Mismo dedo otra vez') || cleanData.includes('mismo dedo') || 
+               cleanData.includes('Place same finger again') || cleanData.includes('otra vez')) {
+        console.log('Solicitando segunda captura de huella');
+        if (global.io) {
+          global.io.emit('huella-progress', { 
+            step: 'segunda_captura',
+            message: cleanData // Usar el mensaje exacto del Arduino
+          });
+        }
+        // NO marcar como terminado aquí, el proceso continúa
+      }
+      
+      else if (cleanData.includes('Procesando') || cleanData.includes('Processing') || 
+               cleanData.includes('Creando modelo') || cleanData.includes('Creating model')) {
+        console.log('Procesando huella');
+        if (global.io) {
+          global.io.emit('huella-progress', { 
+            step: 'procesando',
+            message: cleanData || 'Procesando huella...'
+          });
+        }
+        // NO marcar como terminado aquí, el proceso continúa
+      }
+      
       // Respuestas de éxito
-      if (cleanData.startsWith('SUCCESS:')) {
+      else if (cleanData.startsWith('SUCCESS:')) {
         console.log('Comando ejecutado exitosamente:', cleanData);
+        
+        // Si es un registro de huella exitoso, extraer el ID
+        if (cleanData.includes('ID')) {
+          const idMatch = cleanData.match(/ID\s*(\d+)/);
+          if (idMatch) {
+            const huellaID = parseInt(idMatch[1]);
+            console.log(`Registro de huella completado con ID: ${huellaID}`);
+            if (global.io) {
+              global.io.emit('huella-registered', { 
+                id: huellaID,
+                message: `¡Huella registrada exitosamente con ID ${huellaID}!`
+              });
+            }
+          }
+        }
+        
         processingCommand = false;
         processCommandQueue();
       }
       
       // Respuestas de error
-      if (cleanData.startsWith('ERROR:') || cleanData === 'ERR') {
+      else if (cleanData.startsWith('ERROR:') || cleanData === 'ERR') {
         console.error('Error del Arduino:', cleanData);
+        
+        // Emitir error de huella si está relacionado
+        if (global.io) {
+          global.io.emit('huella-error', { 
+            message: cleanData.replace('ERROR:', '').trim() || 'Error en el proceso de registro'
+          });
+        }
+        
         processingCommand = false;
         processCommandQueue();
       }
       
       // Respuesta de conteo
-      if (cleanData.startsWith('COUNT:')) {
+      else if (cleanData.startsWith('COUNT:')) {
         const countMatch = cleanData.match(/COUNT:\s*(\d+)/);
         if (countMatch) {
           const count = parseInt(countMatch[1]);
@@ -208,7 +293,7 @@ function initArduinoConnection() {
       }
       
       // Otras respuestas que indican fin de comando
-      if (cleanData.startsWith('DEL:') || 
+      else if (cleanData.startsWith('DEL:') || 
           cleanData === 'RESET: OK' ||
           cleanData.includes('BD limpia') ||
           cleanData.startsWith('STATUS:')) {

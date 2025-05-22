@@ -31,67 +31,110 @@ const elements = {
     alertsContainer: document.getElementById('alerts-container')
 };
 
-window.appUtils = {
-    API_URL: '/api',
-    appState: {
-        materias: [],
-        estudiantes: [],
-        materiaSeleccionada: null,
-        arduinoConectado: false
-    },
-    showAlert,
-    formatDate,
-    confirmAction,
-    loadMaterias: function() {
-        // Solo una referencia - la función real está en materias.js
-        if (typeof loadMaterias === 'function') {
-            loadMaterias();
-        } else {
-            console.error('loadMaterias no está definida');
-        }
-    },
-    loadEstudiantes: function() {
-        // Solo una referencia - la función real está en estudiantes.js
-        if (typeof loadEstudiantes === 'function') {
-            loadEstudiantes();
-        } else {
-            console.error('loadEstudiantes no está definida');
-        }
-    },
-    loadAsistenciaData: function() {
-        // Solo una referencia - la función real está en asistencia.js
-        if (typeof loadAsistenciaData === 'function') {
-            loadAsistenciaData();
-        } else {
-            console.error('loadAsistenciaData no está definida');
-        }
-    }
-};
-
-// Modificar la inicialización para asegurar que todo se carga en el orden correcto
+// Inicialización principal
 document.addEventListener('DOMContentLoaded', () => {
-    // Inicializar Socket.io primero
+    console.log('🚀 Iniciando aplicación...');
+    
+    // 1. Inicializar Socket.io primero
     initializeSocket();
     
-    // Configurar eventos de navegación
+    // 2. Configurar eventos de navegación
     configureNavigation();
     
-    // Verificar estado del Arduino
+    // 3. Verificar estado del Arduino
     checkArduinoStatus();
-    // Configurar intervalo para verificar el estado del Arduino
-    setInterval(checkArduinoStatus, 10000);
-    // Esperar un momento para asegurar que los otros scripts se han cargado
+    
+    // 4. Configurar verificación periódica del Arduino
+    setInterval(checkArduinoStatus, 10000); // Cada 10 segundos
+    
+    // 5. Cargar datos iniciales después de un breve delay
     setTimeout(() => {
-        // Cargar datos iniciales
         loadInitialData();
-        
-        // Configurar modales globales
         configureGlobalModals();
-    }, 100);
+        console.log('✅ Aplicación completamente inicializada');
+    }, 1000);
 });
 
-// Configurar eventos de navegación
+// ====== INICIALIZACIÓN DE SOCKET.IO ======
+function initializeSocket() {
+    console.log('🔌 Inicializando Socket.io...');
+    
+    socket = io();
+    
+    // Hacer socket disponible globalmente de múltiples formas
+    window.socket = socket;
+    window.appSocket = socket;
+    
+    socket.on('connect', () => {
+        console.log('✅ Socket.io conectado exitosamente');
+        appState.socketConnected = true;
+        
+        // Notificar a otros módulos que el socket está listo
+        window.dispatchEvent(new CustomEvent('socketReady', { detail: socket }));
+        
+        // Solicitar estado actual del Arduino
+        socket.emit('request-arduino-status');
+    });
+    
+    socket.on('disconnect', () => {
+        console.log('❌ Socket.io desconectado');
+        appState.socketConnected = false;
+    });
+
+    socket.on('connect_error', (error) => {
+        console.error('Error de conexión Socket.io:', error);
+        showAlert('Error de conexión en tiempo real', 'warning');
+    });
+
+    // Eventos del Arduino
+    socket.on('arduino-status', (data) => {
+        console.log('📟 Estado Arduino actualizado:', data);
+        updateArduinoStatus(data.connected, data.ready);
+    });
+    
+    // Eventos de huella digital
+    socket.on('fingerprint-scan', (data) => {
+        console.log('👆 Huella escaneada:', data);
+        handleFingerprintScan(data);
+    });
+    
+    // Eventos de asistencia
+    socket.on('nueva-asistencia', (data) => {
+        console.log('📝 Nueva asistencia registrada:', data);
+        showAlert(`Asistencia registrada: ${data.estudiante.nombre}`, 'success');
+        // Recargar datos si estamos en la sección de asistencia
+        if (!elements.asistenciaSection.classList.contains('d-none')) {
+            if (typeof loadAsistenciaRecords === 'function') {
+                loadAsistenciaRecords();
+            }
+        }
+    });
+    
+    socket.on('asistencia-actualizada', (data) => {
+        console.log('✏️ Asistencia actualizada:', data);
+        // Recargar datos si estamos en la sección de asistencia
+        if (!elements.asistenciaSection.classList.contains('d-none')) {
+            if (typeof loadAsistenciaRecords === 'function') {
+                loadAsistenciaRecords();
+            }
+        }
+    });
+    
+    socket.on('asistencia-eliminada', (data) => {
+        console.log('🗑️ Asistencia eliminada:', data);
+        // Recargar datos si estamos en la sección de asistencia
+        if (!elements.asistenciaSection.classList.contains('d-none')) {
+            if (typeof loadAsistenciaRecords === 'function') {
+                loadAsistenciaRecords();
+            }
+        }
+    });
+}
+
+// ====== NAVEGACIÓN ======
 function configureNavigation() {
+    console.log('🧭 Configurando navegación...');
+    
     elements.navMaterias.addEventListener('click', (e) => {
         e.preventDefault();
         showSection('materias');
@@ -117,40 +160,44 @@ function configureNavigation() {
     });
 }
 
-// Mostrar sección específica y ocultar las demás
 function showSection(sectionName) {
+    console.log(`📄 Mostrando sección: ${sectionName}`);
+    
     // Ocultar todas las secciones
     elements.materiasSection.classList.add('d-none');
     elements.estudiantesSection.classList.add('d-none');
     elements.asistenciaSection.classList.add('d-none');
     elements.papeleraSection.classList.add('d-none');
     
-    // Mostrar la sección solicitada
+    // Mostrar la sección solicitada y cargar datos
     switch (sectionName) {
         case 'materias':
             elements.materiasSection.classList.remove('d-none');
-            // Cargar datos actualizados de materias
-            loadMaterias();
+            if (typeof loadMaterias === 'function') {
+                loadMaterias();
+            }
             break;
         case 'estudiantes':
             elements.estudiantesSection.classList.remove('d-none');
-            // Cargar datos actualizados de estudiantes
-            loadEstudiantes();
+            if (typeof loadEstudiantes === 'function') {
+                loadEstudiantes();
+            }
             break;
         case 'asistencia':
             elements.asistenciaSection.classList.remove('d-none');
-            // Cargar datos para la sección de asistencia
-            loadAsistenciaData();
+            if (typeof loadAsistenciaData === 'function') {
+                loadAsistenciaData();
+            }
             break;
         case 'papelera':
             elements.papeleraSection.classList.remove('d-none');
-            // Cargar materias en papelera
-            loadPapelera();
+            if (typeof loadPapelera === 'function') {
+                loadPapelera();
+            }
             break;
     }
 }
 
-// Actualizar navegación activa
 function updateActiveNav(activeNavElement) {
     // Quitar clase activa de todos los elementos de navegación
     elements.navMaterias.classList.remove('active');
@@ -162,118 +209,82 @@ function updateActiveNav(activeNavElement) {
     activeNavElement.classList.add('active');
 }
 
-// Inicializar Socket.io
-function initializeSocket() {
-    socket = io();
-    
-    socket.on('connect', () => {
-        console.log('Conexión con Socket.io establecida');
-    });
-    
-    socket.on('disconnect', () => {
-        console.log('Conexión con Socket.io perdida');
-    });
-
-    // En la función initializeSocket en app.js
-    socket.on('arduino-status', (data) => {
-        updateArduinoStatus(data.connected);
-    });
-    
-    // Escuchar eventos de Socket.io
-    socket.on('fingerprint-scan', (data) => {
-        console.log('Huella escaneada:', data);
-        handleFingerprintScan(data);
-    });
-    
-    socket.on('nueva-asistencia', (data) => {
-        console.log('Nueva asistencia registrada:', data);
-        showAlert('Asistencia registrada: ' + data.estudiante.nombre, 'success');
-        // Actualizar tabla de asistencia si es visible
-        if (!elements.asistenciaSection.classList.contains('d-none')) {
-            loadAsistenciaRecords();
-        }
-    });
-    
-    socket.on('asistencia-actualizada', (data) => {
-        console.log('Asistencia actualizada:', data);
-        // Actualizar tabla de asistencia si es visible
-        if (!elements.asistenciaSection.classList.contains('d-none')) {
-            loadAsistenciaRecords();
-        }
-    });
-    
-    socket.on('asistencia-eliminada', (data) => {
-        console.log('Asistencia eliminada:', data);
-        // Actualizar tabla de asistencia si es visible
-        if (!elements.asistenciaSection.classList.contains('d-none')) {
-            loadAsistenciaRecords();
-        }
-    });
-    
-    socket.on('arduino-status', (data) => {
-        updateArduinoStatus(data.connected);
-    });
-}
-
-// Verificar estado del Arduino
+// ====== ESTADO DEL ARDUINO ======
 function checkArduinoStatus() {
     fetch(`${API_URL}/arduino/status`)
         .then(response => response.json())
         .then(data => {
-            updateArduinoStatus(data.connected);
+            updateArduinoStatus(data.connected, data.ready);
         })
         .catch(error => {
-            console.error('Error al verificar estado del Arduino:', error);
-            updateArduinoStatus(false);
+            console.error('❌ Error al verificar estado del Arduino:', error);
+            updateArduinoStatus(false, false);
         });
 }
 
-
-
-// Actualizar indicador de estado del Arduino
-function updateArduinoStatus(connected) {
+function updateArduinoStatus(connected, ready = false) {
     appState.arduinoConectado = connected;
+    appState.arduinoReady = ready;
     
-    if (connected) {
+    if (!elements.arduinoStatus) return;
+    
+    if (connected && ready) {
         elements.arduinoStatus.innerHTML = '<i class="bi bi-usb-fill text-success"></i> Arduino conectado';
         elements.arduinoStatus.classList.remove('desconectado');
         elements.arduinoStatus.classList.add('conectado');
+        elements.arduinoStatus.title = 'Arduino conectado y listo';
+    } else if (connected && !ready) {
+        elements.arduinoStatus.innerHTML = '<i class="bi bi-usb-fill text-warning"></i> Arduino iniciando...';
+        elements.arduinoStatus.classList.remove('desconectado', 'conectado');
+        elements.arduinoStatus.title = 'Arduino conectado pero no está listo';
     } else {
         elements.arduinoStatus.innerHTML = '<i class="bi bi-usb-fill text-danger"></i> Arduino desconectado';
         elements.arduinoStatus.classList.remove('conectado');
         elements.arduinoStatus.classList.add('desconectado');
+        elements.arduinoStatus.title = 'Arduino no está conectado';
     }
 }
 
-// Cargar datos iniciales
-function loadInitialData() {
-    // Cargar materias
-    loadMaterias();
-}
-
-// Funciones para manejar eventos de huella digital
+// ====== MANEJO DE EVENTOS DE HUELLA ======
 function handleFingerprintScan(data) {
     const huellaID = data.id;
+    console.log(`👆 Procesando huella escaneada ID: ${huellaID}`);
     
-    // Si hay un modal de registro de huella abierto
-    const huellaProgress = document.getElementById('huella-progress');
-    if (huellaProgress && !huellaProgress.classList.contains('d-none')) {
-        // Estamos en proceso de registro de huella
-        handleHuellaRegistration(huellaID);
+    // Verificar si hay un proceso de registro de huella en curso
+    if (window.registroHuellaEnProgreso) {
+        console.log('🔄 Proceso de registro de huella en curso, delegando...');
+        return; // Los eventos específicos de huella se manejan en estudiantes.js
+    }
+    
+    // Verificar si hay un proceso de asistencia por huella en curso
+    if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual) {
+        console.log('📝 Proceso de asistencia por huella en curso, delegando...');
+        if (typeof handleAsistenciaHuella === 'function') {
+            handleAsistenciaHuella(huellaID);
+        }
         return;
     }
     
-    // Si hay un modal de asistencia por huella abierto
-    const registroHuellaContainer = document.getElementById('registro-huella-container');
-    if (registroHuellaContainer && !registroHuellaContainer.classList.contains('d-none')) {
-        // Estamos en proceso de registro de asistencia por huella
-        handleAsistenciaHuella(huellaID);
-        return;
+    // Si no hay procesos activos, mostrar información
+    showAlert(`Huella detectada (ID: ${huellaID}). No hay procesos activos.`, 'info');
+}
+
+// ====== CARGA DE DATOS INICIALES ======
+function loadInitialData() {
+    console.log('📊 Cargando datos iniciales...');
+    
+    // Cargar materias primero
+    if (typeof loadMaterias === 'function') {
+        loadMaterias();
+    } else {
+        console.warn('⚠️ Función loadMaterias no está disponible');
     }
 }
 
-// Configurar modales globales
+// ====== MODALES GLOBALES ======
 function configureGlobalModals() {
+    console.log('🔧 Configurando modales globales...');
+    
     // Modal de confirmación
     const modalConfirmacion = document.getElementById('modal-confirmacion');
     if (modalConfirmacion) {
@@ -284,20 +295,30 @@ function configureGlobalModals() {
             
             // Quitar evento del botón de confirmar
             const btnConfirmar = document.getElementById('btn-confirmar');
-            const newBtnConfirmar = btnConfirmar.cloneNode(true);
-            btnConfirmar.parentNode.replaceChild(newBtnConfirmar, btnConfirmar);
+            if (btnConfirmar) {
+                const newBtnConfirmar = btnConfirmar.cloneNode(true);
+                btnConfirmar.parentNode.replaceChild(newBtnConfirmar, btnConfirmar);
+            }
         });
     }
 }
 
-// Funciones de utilidad
+// ====== FUNCIONES DE UTILIDAD ======
 
 // Mostrar mensaje de alerta
 function showAlert(message, type = 'info', timeout = 5000) {
+    if (!elements.alertsContainer) {
+        console.warn('⚠️ Contenedor de alertas no encontrado');
+        return;
+    }
+    
     const alertId = 'alert-' + Date.now();
     const alertHTML = `
         <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
-            ${message}
+            <div class="d-flex align-items-center">
+                <i class="bi bi-${getAlertIcon(type)} me-2"></i>
+                <span>${message}</span>
+            </div>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     `;
@@ -316,9 +337,27 @@ function showAlert(message, type = 'info', timeout = 5000) {
     }, timeout);
 }
 
+function getAlertIcon(type) {
+    const icons = {
+        'success': 'check-circle',
+        'danger': 'exclamation-triangle',
+        'warning': 'exclamation-triangle',
+        'info': 'info-circle',
+        'primary': 'info-circle',
+        'secondary': 'info-circle'
+    };
+    return icons[type] || 'info-circle';
+}
+
 // Formatear fecha
 function formatDate(dateString, includeTime = false) {
+    if (!dateString) return 'N/A';
+    
     const date = new Date(dateString);
+    
+    if (isNaN(date.getTime())) {
+        return 'Fecha inválida';
+    }
     
     const options = {
         day: '2-digit',
@@ -329,6 +368,7 @@ function formatDate(dateString, includeTime = false) {
     if (includeTime) {
         options.hour = '2-digit';
         options.minute = '2-digit';
+        options.hour12 = false;
     }
     
     return date.toLocaleDateString('es-ES', options);
@@ -336,31 +376,122 @@ function formatDate(dateString, includeTime = false) {
 
 // Función para confirmar acción
 function confirmAction(title, message, callback, btnText = 'Confirmar', btnType = 'danger') {
-    const modalConfirmacion = new bootstrap.Modal(document.getElementById('modal-confirmacion'));
+    const modalElement = document.getElementById('modal-confirmacion');
+    if (!modalElement) {
+        console.error('❌ Modal de confirmación no encontrado');
+        return;
+    }
     
+    const modalConfirmacion = new bootstrap.Modal(modalElement);
+    
+    // Configurar contenido del modal
     document.getElementById('confirmacion-title').textContent = title;
     document.getElementById('confirmacion-mensaje').textContent = message;
     
     const btnConfirmar = document.getElementById('btn-confirmar');
-    btnConfirmar.textContent = btnText;
-    btnConfirmar.className = `btn btn-${btnType}`;
-    
-    btnConfirmar.addEventListener('click', () => {
-        modalConfirmacion.hide();
-        callback();
-    });
+    if (btnConfirmar) {
+        btnConfirmar.textContent = btnText;
+        btnConfirmar.className = `btn btn-${btnType}`;
+        
+        // Remover listeners anteriores y agregar nuevo
+        const newBtnConfirmar = btnConfirmar.cloneNode(true);
+        btnConfirmar.parentNode.replaceChild(newBtnConfirmar, btnConfirmar);
+        
+        newBtnConfirmar.addEventListener('click', () => {
+            modalConfirmacion.hide();
+            if (typeof callback === 'function') {
+                callback();
+            }
+        });
+    }
     
     modalConfirmacion.show();
 }
 
-// Exportar funciones y variables globales
+// Función helper para obtener el socket
+function getSocket() {
+    return socket || window.socket || window.appSocket;
+}
+
+// Función para verificar si el socket está conectado
+function isSocketConnected() {
+    const currentSocket = getSocket();
+    return currentSocket && currentSocket.connected;
+}
+
+// ====== MANEJO DE ERRORES GLOBALES ======
+window.addEventListener('error', (event) => {
+    console.error('❌ Error global capturado:', event.error);
+    showAlert('Ha ocurrido un error inesperado. Revise la consola para más detalles.', 'danger');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('❌ Promesa rechazada no manejada:', event.reason);
+    showAlert('Error de red o servidor. Intente nuevamente.', 'warning');
+});
+
+// ====== EXPORTACIÓN GLOBAL ======
 window.appUtils = {
+    // Configuración
     API_URL,
+    
+    // Estado
     appState,
+    
+    // Funciones de utilidad
     showAlert,
     formatDate,
     confirmAction,
-    loadMaterias,
-    loadEstudiantes,
-    loadAsistenciaData
+    
+    // Socket
+    getSocket,
+    isSocketConnected,
+    
+    // Funciones de carga (se definen en otros archivos)
+    loadMaterias: function() {
+        if (typeof loadMaterias === 'function') {
+            loadMaterias();
+        } else {
+            console.warn('⚠️ loadMaterias no está definida');
+        }
+    },
+    
+    loadEstudiantes: function() {
+        if (typeof loadEstudiantes === 'function') {
+            loadEstudiantes();
+        } else {
+            console.warn('⚠️ loadEstudiantes no está definida');
+        }
+    },
+    
+    loadAsistenciaData: function() {
+        if (typeof loadAsistenciaData === 'function') {
+            loadAsistenciaData();
+        } else {
+            console.warn('⚠️ loadAsistenciaData no está definida');
+        }
+    },
+    
+    // Navegación
+    showSection,
+    updateActiveNav,
+    
+    // Arduino
+    checkArduinoStatus,
+    updateArduinoStatus
 };
+
+// Evento personalizado para cuando la app esté completamente lista
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('appReady', { 
+            detail: { 
+                socket: getSocket(), 
+                appUtils: window.appUtils 
+            }
+        }));
+        console.log('🎉 Aplicación completamente cargada y lista');
+    }, 1500);
+});
+
+console.log('📱 app.js cargado correctamente');

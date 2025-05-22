@@ -21,6 +21,8 @@ const estudiantesElements = {
     btnEliminarHuella: document.getElementById('btn-eliminar-huella'),
     huellaProgress: document.getElementById('huella-progress'),
     huellaMensaje: document.getElementById('huella-mensaje'),
+    btnCancelarHuella: document.getElementById('btn-cancelar-huella'),
+    progressPercentage: document.getElementById('progress-percentage'),
     btnGuardarEstudiante: document.getElementById('btn-guardar-estudiante')
 };
 
@@ -58,7 +60,177 @@ document.addEventListener('DOMContentLoaded', () => {
     if (estudiantesElements.btnEliminarHuella) {
         estudiantesElements.btnEliminarHuella.addEventListener('click', eliminarHuella);
     }
+    
+    // Configurar evento para cancelar registro de huella
+    if (estudiantesElements.btnCancelarHuella) {
+        estudiantesElements.btnCancelarHuella.addEventListener('click', () => {
+            cancelarRegistroHuella('Registro de huella cancelado por el usuario');
+        });
+    }
+    
+    // Configurar eventos de Socket.io para el progreso de huella
+    setupHuellaSocketEvents();
 });
+
+// Configurar eventos de Socket.io para huella
+function setupHuellaSocketEvents() {
+    // Intentar obtener socket de diferentes maneras
+    let currentSocket = null;
+    
+    if (window.socket) {
+        currentSocket = window.socket;
+    } else if (window.appUtils && window.appUtils.getSocket) {
+        currentSocket = window.appUtils.getSocket();
+    } else if (typeof socket !== 'undefined') {
+        currentSocket = socket;
+    }
+    
+    // Si no está disponible, reintentar
+    if (!currentSocket) {
+        console.log('Socket no disponible aún, reintentando en 500ms...');
+        setTimeout(setupHuellaSocketEvents, 500);
+        return;
+    }
+    
+    console.log('✅ Socket disponible, configurando eventos de huella...');
+    
+    // Escuchar progreso del registro de huella
+    currentSocket.on('huella-progress', (data) => {
+        console.log('Evento huella-progress recibido:', data);
+        if (registroHuellaEnProgreso) {
+            updateHuellaProgress(data);
+        } else {
+            console.log('Evento ignorado - no hay registro en progreso');
+        }
+    });
+    
+    // Escuchar registro exitoso de huella
+    currentSocket.on('huella-registered', (data) => {
+        console.log('Evento huella-registered recibido:', data);
+        if (registroHuellaEnProgreso) {
+            completarRegistroHuella(data.id, data.message);
+        } else {
+            console.log('Evento ignorado - no hay registro en progreso');
+        }
+    });
+    
+    // Escuchar errores de huella
+    socket.on('huella-error', (data) => {
+        console.log('Evento huella-error recibido:', data);
+        if (registroHuellaEnProgreso) {
+            // Mostrar error en la barra de progreso
+            const progressBar = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+            if (progressBar) {
+                progressBar.classList.remove('bg-primary', 'progress-bar-striped', 'progress-bar-animated');
+                progressBar.classList.add('bg-danger');
+            }
+            
+            // Mostrar mensaje de error
+            if (estudiantesElements.huellaMensaje) {
+                estudiantesElements.huellaMensaje.textContent = `Error: ${data.message}`;
+                estudiantesElements.huellaMensaje.style.color = '#dc3545'; // Rojo bootstrap
+            }
+            
+            // Cancelar el proceso después de un momento
+            setTimeout(() => {
+                cancelarRegistroHuella(`Error en el registro: ${data.message}`);
+            }, 3000);
+        } else {
+            console.log('Evento error ignorado - no hay registro en progreso');
+        }
+    });
+    
+    // Mantener el evento original de fingerprint-scan para compatibilidad
+    socket.on('fingerprint-scan', (data) => {
+        console.log('Evento fingerprint-scan recibido:', data);
+        if (registroHuellaEnProgreso) {
+            console.log('Huella escaneada durante registro:', data);
+            // Este evento se maneja ahora por huella-registered
+        }
+    });
+    
+    console.log('✅ Todos los eventos de huella configurados correctamente');
+}
+
+// Actualizar progreso de registro de huella
+function updateHuellaProgress(data) {
+    if (!estudiantesElements.huellaMensaje) return;
+    
+    console.log('Actualizando progreso de huella:', data);
+    
+    // Usar el mensaje exacto del Arduino si está disponible, sino usar uno predeterminado
+    let mensaje = data.message;
+    let progressValue = 0;
+    
+    switch (data.step) {
+        case 'iniciando':
+            progressValue = 10;
+            if (!mensaje || mensaje === 'Iniciando registro de huella...') {
+                mensaje = 'Iniciando registro de huella...';
+            }
+            break;
+        case 'primera_captura':
+            progressValue = 30;
+            if (!mensaje || mensaje.includes('Coloque')) {
+                // Usar el mensaje del Arduino o uno predeterminado
+                mensaje = mensaje || 'Coloque el dedo en el lector...';
+            }
+            break;
+        case 'retirar':
+            progressValue = 50;
+            if (!mensaje || mensaje.includes('Retire')) {
+                mensaje = mensaje || 'Retire el dedo del lector';
+            }
+            break;
+        case 'segunda_captura':
+            progressValue = 70;
+            if (!mensaje || mensaje.includes('mismo')) {
+                mensaje = mensaje || 'Coloque el mismo dedo otra vez...';
+            }
+            break;
+        case 'procesando':
+            progressValue = 90;
+            if (!mensaje) {
+                mensaje = 'Procesando huella...';
+            }
+            break;
+        case 'completado':
+            progressValue = 100;
+            if (!mensaje) {
+                mensaje = '✅ ¡REGISTRO COMPLETADO EXITOSAMENTE!';
+            }
+            // Cambiar el color del texto para destacar el éxito
+            estudiantesElements.huellaMensaje.style.color = '#198754'; // Verde bootstrap
+            estudiantesElements.huellaMensaje.style.fontWeight = 'bold';
+            break;
+        default:
+            // Para cualquier otro mensaje del Arduino, usar el mensaje tal como viene
+            mensaje = data.message || 'Procesando...';
+            // Mantener el progreso anterior si no reconocemos el paso
+            const currentProgress = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+            if (currentProgress) {
+                progressValue = parseInt(currentProgress.getAttribute('aria-valuenow')) || 0;
+            }
+            break;
+    }
+    
+    // Actualizar texto del mensaje
+    estudiantesElements.huellaMensaje.textContent = mensaje;
+    
+    // Actualizar barra de progreso
+    const progressBar = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+    if (progressBar) {
+        progressBar.style.width = `${progressValue}%`;
+        progressBar.setAttribute('aria-valuenow', progressValue);
+    }
+    
+    // Actualizar porcentaje
+    if (estudiantesElements.progressPercentage) {
+        estudiantesElements.progressPercentage.textContent = `${progressValue}%`;
+    }
+    
+    console.log(`Progreso de huella actualizado: ${data.step} - ${mensaje} (${progressValue}%)`);
+}
 
 // Función para debounce (retrasar ejecución)
 function debounce(func, delay) {
@@ -450,7 +622,6 @@ function filtrarEstudiantesPorMateria(materiaId) {
 }
 
 // Iniciar proceso de registro de huella
-// Iniciar proceso de registro de huella
 function iniciarRegistroHuella() {
     // Verificar si el Arduino está conectado
     if (!window.appUtils.appState.arduinoConectado) {
@@ -460,15 +631,31 @@ function iniciarRegistroHuella() {
     
     // Mostrar interfaz de progreso
     estudiantesElements.huellaProgress.classList.remove('d-none');
-    estudiantesElements.huellaMensaje.textContent = 'Iniciando lector de huella...';
+    estudiantesElements.huellaMensaje.textContent = 'Iniciando proceso de registro...';
     
-    // Deshabilitar botón
+    // Resetear estilo del mensaje
+    estudiantesElements.huellaMensaje.style.color = '';
+    estudiantesElements.huellaMensaje.style.fontWeight = '';
+    
+    // Inicializar barra de progreso
+    const progressBar = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+    if (progressBar) {
+        progressBar.style.width = '0%';
+        progressBar.setAttribute('aria-valuenow', 0);
+        progressBar.classList.remove('bg-success', 'bg-danger');
+        progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-primary');
+    }
+    
+    // Deshabilitar botón de registro y habilitar cancelar
     estudiantesElements.btnRegistrarHuella.disabled = true;
+    if (estudiantesElements.btnCancelarHuella) {
+        estudiantesElements.btnCancelarHuella.disabled = false;
+    }
     
     // Indicar que el registro está en progreso
     registroHuellaEnProgreso = true;
     
-    // Generar ID de huella (siguiente disponible)
+    // Obtener el siguiente ID disponible
     fetch(`${window.appUtils.API_URL}/arduino/command`, {
         method: 'POST',
         headers: {
@@ -478,60 +665,16 @@ function iniciarRegistroHuella() {
     })
     .then(response => response.json())
     .then(data => {
-        // El problema puede estar aquí - necesitamos asegurarnos de que estamos
-        // interpretando correctamente la respuesta y generando un ID válido
-        
-        // Modificar esta parte para asegurarnos de tener un ID válido
-        let nextId = 1; // Valor predeterminado
-        
-        // Si data.count existe, incrementarlo. Si no, usar un valor fijo
-        if (data && data.count !== undefined) {
-            nextId = parseInt(data.count) + 1;
-        }
-        
-        console.log('Iniciando registro de huella con ID:', nextId);
-        
-        // Actualizar mensaje
-        estudiantesElements.huellaMensaje.textContent = 'Coloque su dedo en el lector...';
-        
-        // MODIFICAR: Asegurarnos de enviar el comando exactamente como lo espera el Arduino
-        return fetch(`${window.appUtils.API_URL}/arduino/command`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ command: `enroll:${nextId}` })
-        });
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Agregar más logs para depuración
-        console.log('Respuesta del servidor al comando enroll:', data);
-        
         if (!data.success) {
-            throw new Error(data.error || 'Error al iniciar registro de huella');
+            throw new Error(data.error || 'Error al obtener conteo de huellas');
         }
         
-        // Configurar un temporizador para mostrar actualizaciones periódicas
-        let dots = 0;
-        const updateInterval = setInterval(() => {
-            if (!registroHuellaEnProgreso) {
-                clearInterval(updateInterval);
-                return;
-            }
-            
-            dots = (dots + 1) % 4;
-            const dotStr = '.'.repeat(dots);
-            estudiantesElements.huellaMensaje.textContent = `Esperando dedo en el lector${dotStr}`;
-        }, 500);
+        console.log('Comando count enviado, esperando respuesta...');
         
-        // Configurar un temporizador para cancelar si demora demasiado
+        // Esperar un momento para que el Arduino procese el conteo, luego obtener estudiantes
         setTimeout(() => {
-            if (registroHuellaEnProgreso) {
-                clearInterval(updateInterval);
-                cancelarRegistroHuella('El tiempo de espera ha expirado. Intente nuevamente.');
-            }
-        }, 30000); // 30 segundos de timeout
+            obtenerSiguienteIdYRegistrar();
+        }, 1000); // Esperar 1 segundo para el conteo
     })
     .catch(error => {
         console.error('Error al iniciar registro de huella:', error);
@@ -539,32 +682,187 @@ function iniciarRegistroHuella() {
     });
 }
 
+// Función separada para obtener el siguiente ID y enviar comando de registro
+function obtenerSiguienteIdYRegistrar() {
+    // Obtener todos los estudiantes para ver qué IDs están ocupados
+    fetch(`${window.appUtils.API_URL}/estudiantes`)
+        .then(response => response.json())
+        .then(estudiantes => {
+            // Obtener IDs de huella ya utilizados
+            const idsUsados = estudiantes
+                .filter(est => est.huellaID !== null && est.huellaID !== undefined)
+                .map(est => est.huellaID);
+            
+            // Encontrar el primer ID disponible (1-127)
+            let nextId = 1;
+            while (idsUsados.includes(nextId) && nextId <= 127) {
+                nextId++;
+            }
+            
+            if (nextId > 127) {
+                throw new Error('No hay IDs de huella disponibles (máximo 127)');
+            }
+            
+            console.log('Iniciando registro de huella con ID:', nextId);
+            
+            // Actualizar mensaje inicial
+            updateHuellaProgress({
+                step: 'iniciando',
+                message: `Preparando registro con ID ${nextId}...`
+            });
+            
+            // Enviar comando de registro
+            return fetch(`${window.appUtils.API_URL}/arduino/command`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ command: `enroll:${nextId}` })
+            });
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Error al iniciar registro de huella');
+            }
+            
+            console.log('Comando de registro enviado exitosamente');
+            
+            // SINCRONIZAR TIMEOUT CON EL ARDUINO (2 minutos exactamente)
+            setTimeout(() => {
+                if (registroHuellaEnProgreso) {
+                    console.log('Timeout del frontend alcanzado - sincronizado con Arduino');
+                    cancelarRegistroHuella('Tiempo de espera agotado. El Arduino también canceló el proceso.');
+                }
+            }, 120000); // 120 segundos = 2 minutos, exactamente igual que el servidor
+        })
+        .catch(error => {
+            console.error('Error en el proceso de registro:', error);
+            cancelarRegistroHuella('Error al iniciar el registro de huella. Intente nuevamente.');
+        });
+}
+
 // Cancelar proceso de registro de huella
 function cancelarRegistroHuella(mensaje) {
+    console.log('Cancelando registro de huella:', mensaje);
+    
     registroHuellaEnProgreso = false;
     estudiantesElements.btnRegistrarHuella.disabled = false;
     estudiantesElements.huellaProgress.classList.add('d-none');
     
-    if (mensaje) {
-        window.appUtils.showAlert(mensaje, 'danger');
+    // Resetear estilo del mensaje
+    estudiantesElements.huellaMensaje.style.color = '';
+    estudiantesElements.huellaMensaje.style.fontWeight = '';
+    
+    // Resetear barra de progreso
+    const progressBar = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+    if (progressBar) {
+        progressBar.style.width = '0%';
+        progressBar.setAttribute('aria-valuenow', 0);
+        progressBar.classList.remove('bg-success', 'bg-danger');
+        progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-primary');
     }
+    
+    // Resetear porcentaje
+    if (estudiantesElements.progressPercentage) {
+        estudiantesElements.progressPercentage.textContent = '0%';
+    }
+    
+    // Resetear botón de cancelar
+    if (estudiantesElements.btnCancelarHuella) {
+        estudiantesElements.btnCancelarHuella.disabled = false;
+        estudiantesElements.btnCancelarHuella.innerHTML = '<i class="bi bi-x-circle"></i> Cancelar Registro';
+    }
+    
+    if (mensaje) {
+        window.appUtils.showAlert(mensaje, 'warning');
+    }
+    
+    console.log('Registro de huella cancelado y interfaz resetada');
 }
 
 // Completar registro de huella con el ID asignado
-function completarRegistroHuella(huellaID) {
-    if (!registroHuellaEnProgreso) return;
+function completarRegistroHuella(huellaID, mensaje) {
+    if (!registroHuellaEnProgreso) {
+        console.log('Intento de completar registro pero no hay proceso en progreso');
+        return;
+    }
     
+    console.log(`REGISTRO COMPLETADO - ID de huella: ${huellaID}`);
+    
+    // MARCAR INMEDIATAMENTE COMO COMPLETADO
     registroHuellaEnProgreso = false;
     
-    // Actualizar estado de huella
+    // Actualizar progreso al 100% con estado completado
+    updateHuellaProgress({
+        step: 'completado',
+        message: mensaje || `✅ REGISTRO COMPLETADO - Huella registrada con ID ${huellaID}`
+    });
+    
+    // Completar barra de progreso con color de éxito
+    const progressBar = estudiantesElements.huellaProgress.querySelector('.progress-bar');
+    if (progressBar) {
+        progressBar.style.width = '100%';
+        progressBar.setAttribute('aria-valuenow', 100);
+        progressBar.classList.remove('progress-bar-striped', 'progress-bar-animated', 'bg-primary');
+        progressBar.classList.add('bg-success');
+    }
+    
+    // Actualizar porcentaje al 100%
+    if (estudiantesElements.progressPercentage) {
+        estudiantesElements.progressPercentage.textContent = '100%';
+    }
+    
+    // ACTUALIZAR INMEDIATAMENTE EL ESTADO DE HUELLA EN LA INTERFAZ
     actualizarEstadoHuella(huellaID);
     
-    // Ocultar progreso
-    estudiantesElements.huellaProgress.classList.add('d-none');
-    estudiantesElements.btnRegistrarHuella.disabled = false;
+    // Deshabilitar el botón de cancelar ya que el proceso terminó
+    if (estudiantesElements.btnCancelarHuella) {
+        estudiantesElements.btnCancelarHuella.disabled = true;
+        estudiantesElements.btnCancelarHuella.textContent = 'Proceso Completado';
+    }
     
-    // Mostrar mensaje de éxito
-    window.appUtils.showAlert(`Huella registrada correctamente con ID: ${huellaID}`, 'success');
+    // Mostrar mensaje de éxito inmediatamente
+    window.appUtils.showAlert(
+        `🎉 Huella registrada exitosamente con ID ${huellaID}`, 
+        'success',
+        5000 // 5 segundos
+    );
+    
+    console.log('✅ ESTADO ACTUALIZADO - Huella marcada como registrada en la interfaz');
+    
+    // Ocultar el progreso y restaurar la interfaz después de mostrar el éxito
+    setTimeout(() => {
+        console.log('Restaurando interfaz después del registro exitoso');
+        
+        // Ocultar barra de progreso
+        estudiantesElements.huellaProgress.classList.add('d-none');
+        
+        // Habilitar botón de registro nuevamente
+        estudiantesElements.btnRegistrarHuella.disabled = false;
+        
+        // Restaurar botón de cancelar
+        if (estudiantesElements.btnCancelarHuella) {
+            estudiantesElements.btnCancelarHuella.disabled = false;
+            estudiantesElements.btnCancelarHuella.innerHTML = '<i class="bi bi-x-circle"></i> Cancelar Registro';
+        }
+        
+        // Resetear barra de progreso para futuros usos
+        if (progressBar) {
+            progressBar.classList.remove('bg-success');
+            progressBar.classList.add('progress-bar-striped', 'progress-bar-animated', 'bg-primary');
+            progressBar.style.width = '0%';
+            progressBar.setAttribute('aria-valuenow', 0);
+        }
+        
+        // Resetear porcentaje
+        if (estudiantesElements.progressPercentage) {
+            estudiantesElements.progressPercentage.textContent = '0%';
+        }
+        
+        console.log('✅ PROCESO COMPLETAMENTE FINALIZADO - Interfaz restaurada');
+        
+    }, 4000); // 4 segundos para que el usuario vea el estado completado
 }
 
 // Eliminar huella del estudiante actual
@@ -623,6 +921,8 @@ function eliminarHuella() {
 
 // Actualizar estado visual de la huella
 function actualizarEstadoHuella(huellaID) {
+    console.log(`Actualizando estado visual de huella a ID: ${huellaID}`);
+    
     estudianteHuellaActual = huellaID;
     
     if (huellaID) {
@@ -631,27 +931,24 @@ function actualizarEstadoHuella(huellaID) {
         `;
         estudiantesElements.btnRegistrarHuella.textContent = 'Actualizar Huella';
         estudiantesElements.btnEliminarHuella.classList.remove('d-none');
+        
+        // Agregar una pequeña animación para destacar el cambio
+        estudiantesElements.estudianteHuellaStatus.classList.add('fingerprint-pulse');
+        setTimeout(() => {
+            estudiantesElements.estudianteHuellaStatus.classList.remove('fingerprint-pulse');
+        }, 2000);
+        
+        console.log('Estado de huella actualizado a registrada');
     } else {
         estudiantesElements.estudianteHuellaStatus.innerHTML = `
             <i class="bi bi-fingerprint text-danger"></i> Sin registrar
         `;
         estudiantesElements.btnRegistrarHuella.textContent = 'Registrar Huella';
         estudiantesElements.btnEliminarHuella.classList.add('d-none');
+        
+        console.log('Estado de huella actualizado a sin registrar');
     }
 }
-
-// Manejar evento de huella escaneada desde socket
-if (typeof socket !== 'undefined') { // Verificar si socket está definido
-    socket.on('fingerprint-scan', (data) => {
-        const huellaID = data.id;
-        
-        if (registroHuellaEnProgreso) {
-            // Estamos en proceso de registro
-            completarRegistroHuella(huellaID);
-        }
-    });
-}
-
 
 // Exponer funciones necesarias globalmente
 window.loadEstudiantes = loadEstudiantes;
