@@ -10,210 +10,253 @@
 SoftwareSerial fingerSerial(FINGERPRINT_RX, FINGERPRINT_TX);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerSerial);
 
+// Variables globales optimizadas
+bool sensorOK = false;
+bool ready = false;
+
 void setup() {
-  // Inicializar comunicación serial con el PC
   Serial.begin(9600);
-  while (!Serial);
-  
-  // Configurar LED
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+  delay(1000);
   
-  // Inicializar sensor de huella
-  finger.begin(57600);
+  Serial.println(F("Iniciando..."));
+  initSensor();
   
-  if (finger.verifyPassword()) {
-    Serial.println("Sensor de huella encontrado!");
+  if (sensorOK) {
+    Serial.println(F("Sistema listo"));
+    ready = true;
+    blinkLED(3, 200);
   } else {
-    Serial.println("No se encontró el sensor de huella :(");
-    while (1) { 
-      digitalWrite(LED_PIN, HIGH);
-      delay(500);
-      digitalWrite(LED_PIN, LOW);
-      delay(500);
-    }
+    Serial.println(F("Sin sensor - modo prueba"));
+    ready = true;
   }
   
-  // Obtener parámetros del sensor
-  Serial.println("Leyendo parámetros del sensor...");
-  finger.getParameters();
-  Serial.print("Estado: "); Serial.println(finger.status_reg, HEX);
-  Serial.print("ID del sistema: "); Serial.println(finger.system_id, HEX);
-  Serial.print("Capacidad: "); Serial.println(finger.capacity);
-  Serial.print("Nivel de seguridad: "); Serial.println(finger.security_level);
-  Serial.print("Dirección del dispositivo: "); Serial.println(finger.device_addr, HEX);
-  Serial.print("Velocidad de paquete: "); Serial.println(finger.packet_len);
+  // Enviar mensaje final para que el servidor sepa que está listo
+  Serial.println(F("READY"));
+}
+
+void initSensor() {
+  // Probar baudrates comunes
+  uint32_t rates[] = {57600, 9600, 19200};
   
-  // Configurar sensor para modo de espera
-  finger.getTemplateCount();
-  Serial.print("Sensor contiene "); Serial.print(finger.templateCount); Serial.println(" plantillas");
+  for (int i = 0; i < 3; i++) {
+    finger.begin(rates[i]);
+    delay(500);
+    
+    if (finger.verifyPassword()) {
+      sensorOK = true;
+      finger.getTemplateCount();
+      Serial.print(F("Conectado: "));
+      Serial.print(finger.templateCount);
+      Serial.println(F(" huellas"));
+      return;
+    }
+  }
+  sensorOK = false;
 }
 
 void loop() {
-  // Esperar comandos desde el Serial
+  if (!ready) return;
+  
   if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
     
-    if (command == "scan") {
-      int fingerID = getFingerprintID();
-      if (fingerID >= 0) {
-        Serial.print("ID#");
-        Serial.println(fingerID);
-        blinkLED(1, 200); // Blink una vez si se reconoció la huella
-      } else {
-        Serial.println("Error en la lectura o huella no encontrada");
-        blinkLED(3, 200); // Blink tres veces si hay error
-      }
+    if (cmd.length() == 0) return;
+    
+    if (cmd == "scan") {
+      doScan();
     } 
-    else if (command.startsWith("enroll:")) {
-      int id = command.substring(7).toInt();
-      if (id > 0) {
-        enrollFingerprint(id);
-      } else {
-        Serial.println("ID inválido");
-      }
+    else if (cmd.startsWith("enroll:")) {
+      int id = cmd.substring(7).toInt();
+      doEnroll(id);
     }
-    else if (command.startsWith("delete:")) {
-      int id = command.substring(7).toInt();
-      if (id > 0) {
-        deleteFingerprint(id);
-      } else {
-        Serial.println("ID inválido");
-      }
+    else if (cmd.startsWith("delete:")) {
+      int id = cmd.substring(7).toInt();
+      doDelete(id);
     }
-    else if (command == "count") {
-      finger.getTemplateCount();
-      Serial.print("Sensor contiene "); 
-      Serial.print(finger.templateCount); 
-      Serial.println(" plantillas");
+    else if (cmd == "count") {
+      doCount();
+    }
+    else if (cmd == "empty") {
+      doEmpty();
+    }
+    else if (cmd == "status") {
+      doStatus();
+    }
+    else if (cmd == "reset") {
+      doReset();
+    }
+    else {
+      Serial.println(F("ERROR: Comando invalido"));
     }
   }
 }
 
-// Obtener ID de huella
-int getFingerprintID() {
-  digitalWrite(LED_PIN, HIGH);
-  int p = finger.getImage();
+void doScan() {
+  if (!sensorOK) {
+    Serial.println(F("ERROR: Sin sensor"));
+    return;
+  }
   
-  if (p != FINGERPRINT_OK) {
-    digitalWrite(LED_PIN, LOW);
-    return -1;
-  }
-
-  p = finger.image2Tz();
-  if (p != FINGERPRINT_OK) {
-    digitalWrite(LED_PIN, LOW);
-    return -1;
-  }
-
-  p = finger.fingerFastSearch();
+  digitalWrite(LED_PIN, HIGH);
+  int id = getFingerprintID();
   digitalWrite(LED_PIN, LOW);
   
-  if (p != FINGERPRINT_OK) {
-    return -1;
-  }
-  
-  return finger.fingerID;
-}
-
-// Registrar nueva huella
-uint8_t enrollFingerprint(uint8_t id) {
-  Serial.println("Esperando huella válida para registrar...");
-  
-  while (true) {
-    digitalWrite(LED_PIN, HIGH);
-    int p = finger.getImage();
-    
-    if (p == FINGERPRINT_OK) {
-      digitalWrite(LED_PIN, LOW);
-      break;
-    }
-    
-    switch (p) {
-      case FINGERPRINT_NOFINGER:
-        Serial.println(".");
-        break;
-      default:
-        Serial.println("Error en la imagen");
-        break;
-    }
-    delay(100);
-  }
-  
-  // OK success!
-  int p = finger.image2Tz(1);
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Error en la conversión");
-    return p;
-  }
-  
-  Serial.println("Levante el dedo");
-  delay(2000);
-  p = 0;
-  while (p != FINGERPRINT_NOFINGER) {
-    p = finger.getImage();
-  }
-  
-  Serial.println("Vuelva a colocar el mismo dedo");
-  
-  p = -1;
-  while (p != FINGERPRINT_OK) {
-    digitalWrite(LED_PIN, HIGH);
-    p = finger.getImage();
-    
-    if (p == FINGERPRINT_OK) {
-      digitalWrite(LED_PIN, LOW);
-      break;
-    }
-    delay(100);
-  }
-  
-  // OK success!
-  p = finger.image2Tz(2);
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Error en la conversión");
-    return p;
-  }
-  
-  // OK converted!
-  Serial.print("Creando modelo para #");
-  Serial.println(id);
-  
-  p = finger.createModel();
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Error al crear el modelo");
-    return p;
-  }
-  
-  p = finger.storeModel(id);
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Error al guardar el modelo");
-    return p;
-  }
-  
-  Serial.print("Huella guardada con ID #");
-  Serial.println(id);
-  blinkLED(2, 200); // Blink 2 veces para confirmar registro
-  return true;
-}
-
-// Eliminar una huella
-uint8_t deleteFingerprint(uint8_t id) {
-  uint8_t p = finger.deleteModel(id);
-
-  if (p == FINGERPRINT_OK) {
-    Serial.print("ID #"); Serial.print(id); Serial.println(" eliminado!");
-    blinkLED(2, 200); // Blink 2 veces para confirmar eliminación
-    return true;
+  if (id >= 0) {
+    Serial.print(F("ID#"));
+    Serial.println(id);
+    blinkLED(1, 200);
   } else {
-    Serial.print("Error al eliminar ID #"); Serial.println(id);
-    blinkLED(3, 200); // Blink 3 veces para error
-    return p;
+    Serial.println(F("ERROR: No leido"));
+    blinkLED(3, 200);
   }
 }
 
-// Función para hacer parpadear el LED
+void doEnroll(int id) {
+  if (!sensorOK) {
+    Serial.println(F("ERROR: Sin sensor"));
+    return;
+  }
+  
+  if (id <= 0 || id > 127) {
+    Serial.println(F("ERROR: ID 1-127"));
+    return;
+  }
+  
+  Serial.print(F("Registrando ID "));
+  Serial.println(id);
+  
+  if (enrollFinger(id) == FINGERPRINT_OK) {
+    Serial.print(F("SUCCESS: ID "));
+    Serial.println(id);
+    blinkLED(2, 300);
+  } else {
+    Serial.println(F("ERROR: Fallo registro"));
+    blinkLED(5, 100);
+  }
+}
+
+void doDelete(int id) {
+  if (!sensorOK) {
+    Serial.println(F("ERROR: Sin sensor"));
+    return;
+  }
+  
+  if (finger.deleteModel(id) == FINGERPRINT_OK) {
+    Serial.print(F("SUCCESS: Eliminado "));
+    Serial.println(id);
+    blinkLED(2, 200);
+  } else {
+    Serial.println(F("ERROR: No eliminado"));
+  }
+}
+
+void doCount() {
+  if (!sensorOK) {
+    Serial.println(F("COUNT: 0"));
+    return;
+  }
+  
+  finger.getTemplateCount();
+  Serial.print(F("COUNT: "));
+  Serial.println(finger.templateCount);
+}
+
+void doEmpty() {
+  if (!sensorOK) {
+    Serial.println(F("ERROR: Sin sensor"));
+    return;
+  }
+  
+  if (finger.emptyDatabase() == FINGERPRINT_OK) {
+    Serial.println(F("SUCCESS: BD limpia"));
+  } else {
+    Serial.println(F("ERROR: No limpiado"));
+  }
+}
+
+void doStatus() {
+  Serial.print(F("STATUS: "));
+  Serial.println(sensorOK ? F("OK") : F("SIN_SENSOR"));
+}
+
+void doReset() {
+  sensorOK = false;
+  ready = false;
+  delay(500);
+  initSensor();
+  ready = true;
+  Serial.println(F("RESET: OK"));
+}
+
+int getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.fingerFastSearch();
+  
+  if (p == FINGERPRINT_OK) {
+    return finger.fingerID;
+  }
+  return -1;
+}
+
+uint8_t enrollFinger(uint8_t id) {
+  uint8_t p = -1;
+  
+  Serial.println(F("Coloque dedo..."));
+  
+  // Primera imagen
+  unsigned long start = millis();
+  while (p != FINGERPRINT_OK && (millis() - start) < 10000) {
+    p = finger.getImage();
+    if (p == FINGERPRINT_NOFINGER) {
+      delay(200);
+    } else if (p != FINGERPRINT_OK) {
+      return p;
+    }
+  }
+  
+  if (p != FINGERPRINT_OK) return FINGERPRINT_TIMEOUT;
+
+  p = finger.image2Tz(1);
+  if (p != FINGERPRINT_OK) return p;
+
+  Serial.println(F("Retire dedo"));
+  delay(2000);
+  
+  while (finger.getImage() != FINGERPRINT_NOFINGER);
+
+  Serial.println(F("Mismo dedo otra vez..."));
+  
+  // Segunda imagen
+  p = -1;
+  start = millis();
+  while (p != FINGERPRINT_OK && (millis() - start) < 10000) {
+    p = finger.getImage();
+    if (p == FINGERPRINT_NOFINGER) {
+      delay(200);
+    } else if (p != FINGERPRINT_OK) {
+      return p;
+    }
+  }
+  
+  if (p != FINGERPRINT_OK) return FINGERPRINT_TIMEOUT;
+
+  p = finger.image2Tz(2);
+  if (p != FINGERPRINT_OK) return p;
+
+  p = finger.createModel();
+  if (p != FINGERPRINT_OK) return p;
+
+  return finger.storeModel(id);
+}
+
 void blinkLED(int times, int delayMs) {
   for (int i = 0; i < times; i++) {
     digitalWrite(LED_PIN, HIGH);
