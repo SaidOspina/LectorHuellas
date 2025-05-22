@@ -1658,9 +1658,6 @@ function renderizarReporte(data) {
                     Reporte generado el ${window.appUtils.formatDate(new Date(), true)}
                 </div>
                 <div>
-                    <button type="button" class="btn btn-success" id="btn-descargar-reporte">
-                        <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
-                    </button>
                     <button type="button" class="btn btn-primary" id="btn-imprimir-reporte">
                         <i class="bi bi-printer"></i> Imprimir
                     </button>
@@ -1759,7 +1756,6 @@ function imprimirReporte() {
     if (btnImprimir) btnImprimir.classList.add('no-print');
 }
 
-// Reemplazar en frontend/js/asistencia.js
 
 // Función mejorada para cargar registros de asistencia
 function cargarRegistrosAsistencia() {
