@@ -201,7 +201,7 @@ router.post('/', async (req, res) => {
     const fechaInicio = new Date(fechaAsistencia);
     fechaInicio.setHours(0, 0, 0, 0);
     
-    const fechaFin = new Date(fechaActual.getTime() + 3 * 60 * 60 * 1000); 
+    const fechaFin = new Date(fechaAsistencia.getTime() + 3 * 60 * 60 * 1000); 
     
     const asistenciaExistente = await Asistencia.findOne({
       estudiante,
@@ -210,18 +210,10 @@ router.post('/', async (req, res) => {
     });
     
     if (asistenciaExistente) {
-      // Si ya existe, actualizar el estado de presencia
-      asistenciaExistente.presente = presente !== undefined ? presente : true;
-      asistenciaExistente.fecha = fechaAsistencia;
-      
-      await asistenciaExistente.save();
-      
-      const asistenciaActualizada = await Asistencia.findById(asistenciaExistente._id)
-        .populate('estudiante', 'nombre codigo programaAcademico')
-        .populate('materia', 'nombre codigo');
+
       
       return res.json({
-        mensaje: 'Registro de asistencia actualizado',
+        mensaje: 'Registro de asistencia repetido',
         asistencia: asistenciaActualizada
       });
     }
@@ -312,7 +304,7 @@ router.post('/huella', async (req, res) => {
       });
     }
 
-    console.log('✅ Sistema de escaneo continuo implementado - 15 segundos con re-envío automático');
+    console.log('✅ Sistema de escaneo continuo implementado - 5 segundos con re-envío automático');
     // Si no existe, crear un nuevo registro de asistencia    
     // Crear un nuevo registro de asistencia
     const nuevaAsistencia = new Asistencia({
