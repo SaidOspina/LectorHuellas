@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Asistencia</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Barra de navegación -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-fingerprint"></i> Control de Asistencia
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" id="nav-materias">Materias</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" id="nav-estudiantes">Estudiantes</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" id="nav-asistencia">Asistencia</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" id="nav-papelera">Papelera</a>
+                    </li>
+                </ul>
+            </div>
+            <div class="d-flex">
+                <span class="text-white me-2" id="arduino-status">
+                    <i class="bi bi-usb-fill text-danger"></i> Arduino desconectado
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Contenedor de alertas -->
+    <div class="container mt-3">
+        <div id="alerts-container"></div>
+    </div>
+
+    <!-- Área principal de contenido -->
+    <main class="container mt-4 mb-5">
+        <!-- Sección de Materias -->
+        <section id="materias-section" class="content-section">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Materias</h2>
+                <button type="button" class="btn btn-primary" id="btn-nueva-materia">
+                    <i class="bi bi-plus-circle"></i> Nueva Materia
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="materias-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Código</th>
+                                    <th>Descripción</th>
+                                    <th>Estudiantes</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div id="materias-empty" class="text-center py-4 d-none">
+                        <p class="text-muted">No hay materias disponibles</p>
+                        <button type="button" class="btn btn-primary" id="btn-nueva-materia-empty">
+                            <i class="bi bi-plus-circle"></i> Crear Materia
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sección de Estudiantes -->
+        <section id="estudiantes-section" class="content-section d-none">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Estudiantes</h2>
+                <button type="button" class="btn btn-primary" id="btn-nuevo-estudiante">
+                    <i class="bi bi-plus-circle"></i> Nuevo Estudiante
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="estudiantes-search" placeholder="Buscar por nombre o código...">
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="estudiantes-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Código</th>
+                                    <th>Programa Académico</th>
+                                    <th>Huella</th>
+                                    <th>Materias</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div id="estudiantes-empty" class="text-center py-4 d-none">
+                        <p class="text-muted">No hay estudiantes registrados</p>
+                        <button type="button" class="btn btn-primary" id="btn-nuevo-estudiante-empty">
+                            <i class="bi bi-plus-circle"></i> Registrar Estudiante
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sección de Asistencia -->
+        <section id="asistencia-section" class="content-section d-none">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Registro de Asistencia</h2>
+                <div>
+                    <button type="button" class="btn btn-outline-primary me-2" id="btn-asistencia-masiva">
+                        <i class="bi bi-list-check"></i> Asistencia Masiva
+                    </button>
+                    <button type="button" class="btn btn-primary" id="btn-registrar-asistencia">
+                        <i class="bi bi-fingerprint"></i> Registrar Asistencia
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="asistencia-tabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="tab-registro" href="#">Registro</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="tab-reportes" href="#">Reportes</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <!-- Tab de Registro de Asistencia -->
+                    <div id="registro-tab-content">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Materia</label>
+                                <select class="form-select" id="asistencia-materia">
+                                    <option value="">Seleccionar materia...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha</label>
+                                <input type="date" class="form-control" id="asistencia-fecha">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">&nbsp;</label>
+                                <div class="d-grid">
+                                    <button type="button" class="btn btn-primary" id="btn-filtrar-asistencia">
+                                        <i class="bi bi-search"></i> Filtrar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="asistencia-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Estudiante</th>
+                                        <th>Código</th>
+                                        <th>Materia</th>
+                                        <th>Fecha/Hora</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div id="asistencia-empty" class="text-center py-4 d-none">
+                            <p class="text-muted">No hay registros de asistencia para los filtros seleccionados</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Tab de Reportes de Asistencia -->
+                    <div id="reportes-tab-content" class="d-none">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Materia</label>
+                                <select class="form-select" id="reporte-materia">
+                                    <option value="">Seleccionar materia...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Rango de fechas</label>
+                                <div class="input-group">
+                                    <input type="date" class="form-control" id="reporte-fecha-inicio">
+                                    <span class="input-group-text">a</span>
+                                    <input type="date" class="form-control" id="reporte-fecha-fin">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">&nbsp;</label>
+                                <div class="d-grid">
+                                    <button type="button" class="btn btn-primary" id="btn-generar-reporte">
+                                        <i class="bi bi-file-earmark-text"></i> Generar Reporte
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="reporte-resultado" class="mt-3">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> Seleccione una materia y un rango de fechas para generar el reporte.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sección de Papelera -->
+        <section id="papelera-section" class="content-section d-none">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Papelera</h2>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="papelera-tabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="tab-materias-papelera" href="#">Materias</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div id="materias-papelera-content">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="materias-papelera-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Código</th>
+                                        <th>Descripción</th>
+                                        <th>Fecha eliminación</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div id="materias-papelera-empty" class="text-center py-4 d-none">
+                            <p class="text-muted">No hay materias en la papelera</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modales -->
+
+    <!-- Modal de Nueva Materia -->
+    <div class="modal fade" id="modal-materia" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modal-materia-title">Nueva Materia</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-materia">
+                        <input type="hidden" id="materia-id">
+                        <div class="mb-3">
+                            <label for="materia-nombre" class="form-label">Nombre</label>
+                            <input type="text" class="form-control" id="materia-nombre" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="materia-codigo" class="form-label">Código</label>
+                            <input type="text" class="form-control" id="materia-codigo" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="materia-descripcion" class="form-label">Descripción</label>
+                            <textarea class="form-control" id="materia-descripcion" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-guardar-materia">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Nuevo Estudiante -->
+    <div class="modal fade" id="modal-estudiante" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modal-estudiante-title">Nuevo Estudiante</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-estudiante">
+                        <input type="hidden" id="estudiante-id">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="estudiante-nombre" class="form-label">Nombre Completo</label>
+                                <input type="text" class="form-control" id="estudiante-nombre" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="estudiante-codigo" class="form-label">Código</label>
+                                <input type="text" class="form-control" id="estudiante-codigo" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="estudiante-programa" class="form-label">Programa Académico</label>
+                            <input type="text" class="form-control" id="estudiante-programa" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Huella Digital</label>
+                            <div class="d-flex align-items-center">
+                                <span id="estudiante-huella-status" class="me-3">
+                                    <i class="bi bi-fingerprint text-danger"></i> Sin registrar
+                                </span>
+                                <button type="button" class="btn btn-outline-primary" id="btn-registrar-huella">
+                                    Registrar Huella
+                                </button>
+                                <button type="button" class="btn btn-outline-danger ms-2 d-none" id="btn-eliminar-huella">
+                                    Eliminar Huella
+                                </button>
+                            </div>
+                            <div class="mt-2 d-none" id="huella-progress">
+                                <div class="progress">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                                </div>
+                                <small class="text-muted mt-1" id="huella-mensaje">Esperando lector...</small>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Materias</label>
+                            <select class="form-select" id="estudiante-materias" multiple>
+                            </select>
+                            <small class="text-muted">Mantenga presionado Ctrl para seleccionar múltiples materias</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-guardar-estudiante">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Registro de Asistencia -->
+    <div class="modal fade" id="modal-asistencia" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Registrar Asistencia</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-asistencia">
+                        <div class="mb-3">
+                            <label for="asistencia-modal-materia" class="form-label">Materia</label>
+                            <select class="form-select" id="asistencia-modal-materia" required>
+                                <option value="">Seleccionar materia...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Método de Registro</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="metodo-registro" id="metodo-huella" value="huella" checked>
+                                <label class="form-check-label" for="metodo-huella">
+                                    Por huella digital
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="metodo-registro" id="metodo-manual" value="manual">
+                                <label class="form-check-label" for="metodo-manual">
+                                    Registro manual
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Opción de registro por huella -->
+                        <div id="registro-huella-container">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> Coloque el dedo en el lector para registrar la asistencia.
+                            </div>
+                            <div class="text-center">
+                                <i class="bi bi-fingerprint display-1 text-primary"></i>
+                                <div class="mt-3" id="huella-asistencia-status">Esperando huella...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Opción de registro manual -->
+                        <div id="registro-manual-container" class="d-none">
+                            <div class="mb-3">
+                                <label for="asistencia-estudiante" class="form-label">Estudiante</label>
+                                <select class="form-select" id="asistencia-estudiante">
+                                    <option value="">Seleccionar estudiante...</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="asistencia-fecha-hora" class="form-label">Fecha y Hora</label>
+                                <input type="datetime-local" class="form-control" id="asistencia-fecha-hora">
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="asistencia-presente" checked>
+                                <label class="form-check-label" for="asistencia-presente">
+                                    Presente
+                                </label>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                    <button type="button" class="btn btn-primary d-none" id="btn-guardar-asistencia-manual">Guardar Asistencia</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Asistencia Masiva -->
+    <div class="modal fade" id="modal-asistencia-masiva" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Registro de Asistencia Masiva</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-asistencia-masiva">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="asistencia-masiva-materia" class="form-label">Materia</label>
+                                <select class="form-select" id="asistencia-masiva-materia" required>
+                                    <option value="">Seleccionar materia...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="asistencia-masiva-fecha" class="form-label">Fecha</label>
+                                <input type="date" class="form-control" id="asistencia-masiva-fecha">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Estudiantes</label>
+                            <div class="card">
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover m-0" id="asistencia-masiva-table">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" id="check-all-estudiantes">
+                                                            <label class="form-check-label" for="check-all-estudiantes"></label>
+                                                        </div>
+                                                    </th>
+                                                    <th>Nombre</th>
+                                                    <th>Código</th>
+                                                    <th>Programa Académico</th>
+                                                    <th>Estado</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                    <div id="asistencia-masiva-empty" class="text-center py-4 d-none">
+                                        <p class="text-muted">No hay estudiantes inscritos en esta materia</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-guardar-asistencia-masiva">Guardar Asistencia</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmación -->
+    <div class="modal fade" id="modal-confirmacion" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmacion-title">Confirmar acción</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="confirmacion-mensaje">¿Está seguro de realizar esta acción?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" id="btn-confirmar">Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts JS -->
+    <!-- Scripts JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="js/materias.js"></script>
+    <script src="js/estudiantes.js"></script>
+    <script src="js/asistencia.js"></script>
+    <script src="js/app.js"></script>   
+</body>
+</html>

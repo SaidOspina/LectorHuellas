@@ -1,0 +1,289 @@
+/* Estilos generales */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+    color: #333;
+}
+
+/* Estilos para secciones de contenido */
+.content-section {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Estilos para encabezados */
+h2 {
+    color: #0d6efd;
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+/* Personalización de la barra de navegación */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.navbar-dark .navbar-nav .nav-link.active {
+    font-weight: 600;
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 0.25rem;
+}
+
+/* Estilos para cards */
+.card {
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    margin-bottom: 1.5rem;
+    border: none;
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+/* Estilos para tablas */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    font-weight: 600;
+    color: #495057;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Estilos para badge de huella */
+.badge-huella {
+    display: inline-block;
+    padding: 0.35em 0.65em;
+    font-size: 0.75em;
+    font-weight: 500;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 0.25rem;
+}
+
+.badge-huella.registrada {
+    background-color: #198754;
+    color: white;
+}
+
+.badge-huella.no-registrada {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* Estilos para botones de acción en tablas */
+.btn-accion {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    border-radius: 0.2rem;
+    margin-right: 0.25rem;
+}
+
+.btn-accion:last-child {
+    margin-right: 0;
+}
+
+/* Estilos para el estado del Arduino */
+#arduino-status {
+    font-size: 0.875rem;
+    padding: 0.35em 0.65em;
+    border-radius: 0.25rem;
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+#arduino-status i {
+    margin-right: 0.25rem;
+}
+
+#arduino-status.conectado i {
+    color: #198754;
+}
+
+#arduino-status.desconectado i {
+    color: #dc3545;
+}
+
+/* Animación para el registro de huella digital */
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.7;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.fingerprint-pulse {
+    animation: pulse 1.5s infinite;
+}
+
+/* Estilos para alertas */
+#alerts-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+    width: 350px;
+    max-width: 100%;
+}
+
+.alert {
+    margin-bottom: 10px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    border-radius: 0.5rem;
+    animation: slideIn 0.3s ease-in-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Estilos para reportes */
+.reporte-container {
+    background-color: #fff;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    padding: 1.5rem;
+}
+
+.reporte-header {
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.reporte-header h4 {
+    margin-bottom: 0.5rem;
+    color: #0d6efd;
+    font-weight: 600;
+}
+
+.reporte-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.reporte-info-item {
+    padding: 0.5rem 1rem;
+    background-color: #f8f9fa;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.reporte-tabla {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+}
+
+.reporte-tabla th,
+.reporte-tabla td {
+    padding: 0.75rem;
+    border: 1px solid #e9ecef;
+}
+
+.reporte-tabla th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    text-align: left;
+}
+
+.reporte-tabla-presente {
+    color: #198754;
+}
+
+.reporte-tabla-ausente {
+    color: #dc3545;
+}
+
+.reporte-footer {
+    border-top: 1px solid #e9ecef;
+    padding-top: 1rem;
+    margin-top: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.reporte-footer .fecha-generacion {
+    font-size: 0.875rem;
+    color: #6c757d;
+}
+
+/* Estilos para formularios */
+.form-label {
+    font-weight: 500;
+}
+
+.form-select, .form-control {
+    border-radius: 0.375rem;
+}
+
+/* Estilos para modales */
+.modal-content {
+    border-radius: 0.5rem;
+    border: none;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.modal-header {
+    border-bottom: 1px solid #e9ecef;
+    background-color: #f8f9fa;
+    border-top-left-radius: 0.5rem;
+    border-top-right-radius: 0.5rem;
+}
+
+.modal-footer {
+    border-top: 1px solid #e9ecef;
+    background-color: #f8f9fa;
+    border-bottom-left-radius: 0.5rem;
+    border-bottom-right-radius: 0.5rem;
+}
+
+/* Estilos responsivos */
+@media (max-width: 768px) {
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .table-responsive {
+        margin-bottom: 0;
+    }
+    
+    .btn-accion {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.75rem;
+    }
+    
+    #alerts-container {
+        width: 280px;
+    }
+}
