@@ -201,8 +201,7 @@ router.post('/', async (req, res) => {
     const fechaInicio = new Date(fechaAsistencia);
     fechaInicio.setHours(0, 0, 0, 0);
     
-    const fechaFin = new Date(fechaAsistencia);
-    fechaFin.setHours(23, 59, 59, 999);
+    const fechaFin = new Date(fechaActual.getTime() + 3 * 60 * 60 * 1000); 
     
     const asistenciaExistente = await Asistencia.findOne({
       estudiante,

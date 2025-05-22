@@ -507,44 +507,46 @@ function editarEstudiante(estudiante) {
 
 // Eliminar estudiante
 function eliminarEstudiante(estudiante) {
+    console.log('🗑️ Eliminando estudiante:', estudiante.nombre);
+    
+    // OPCIÓN 1: Una sola confirmación con modal
     window.appUtils.confirmAction(
         'Eliminar Estudiante',
-        `¿Está seguro de eliminar al estudiante "${estudiante.nombre}"? Esta acción requiere confirmación adicional.`,
+        `¿Está seguro de eliminar al estudiante "${estudiante.nombre}" (${estudiante.codigo})?\n\n` +
+        `Esta acción eliminará:\n` +
+        `• Los datos del estudiante de la base de datos\n` +
+        `${estudiante.huellaID ? `• Su huella digital del sensor AS608 (ID: ${estudiante.huellaID})\n` : ''}` +
+        `\n⚠️ Esta acción NO se puede deshacer.`,
         () => {
-            // Primera confirmación pasada, ahora pedir segunda confirmación
-            window.appUtils.confirmAction(
-                'Confirmar Eliminación',
-                `Por favor, confirme nuevamente que desea eliminar al estudiante "${estudiante.nombre}" (Código: ${estudiante.codigo})`,
-                () => {
-                    // Segunda confirmación pasada, proceder con eliminación
-                    fetch(`${window.appUtils.API_URL}/estudiantes/${estudiante._id}?confirmar=true`, {
-                        method: 'DELETE'
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            return response.json().then(err => {
-                                throw new Error(err.error || 'Error al eliminar estudiante');
-                            });
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        window.appUtils.showAlert(`Estudiante "${estudiante.nombre}" eliminado correctamente`, 'success');
-                        loadEstudiantes();
-                    })
-                    .catch(error => {
-                        console.error('Error al eliminar estudiante:', error);
-                        window.appUtils.showAlert(error.message, 'danger');
+            // Ejecutar eliminación directamente
+            console.log('✅ Usuario confirmó eliminación');
+            
+            fetch(`${window.appUtils.API_URL}/estudiantes/${estudiante._id}?confirmar=true`, {
+                method: 'DELETE'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.error || 'Error al eliminar estudiante');
                     });
-                },
-                'Eliminar definitivamente',
-                'danger'
-            );
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('✅ Estudiante eliminado:', data);
+                window.appUtils.showAlert(`Estudiante "${estudiante.nombre}" eliminado correctamente`, 'success');
+                loadEstudiantes();
+            })
+            .catch(error => {
+                console.error('❌ Error al eliminar estudiante:', error);
+                window.appUtils.showAlert(error.message, 'danger');
+            });
         },
-        'Eliminar',
-        'warning'
+        'Eliminar Definitivamente',
+        'danger'
     );
 }
+
 
 // Registrar asistencia para un estudiante
 function registrarAsistenciaEstudiante(estudiante) {
