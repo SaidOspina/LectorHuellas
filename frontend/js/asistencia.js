@@ -114,9 +114,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Configurar listeners de eventos
 function setupEventListeners() {
-    // Evento para filtrar asistencia
+    // Evento para filtrar asistencia - CAMBIAR para usar la nueva función
     if (asistenciaElements.btnFiltrarAsistencia) {
-        asistenciaElements.btnFiltrarAsistencia.addEventListener('click', cargarRegistrosAsistencia);
+        asistenciaElements.btnFiltrarAsistencia.addEventListener('click', aplicarFiltrosAsistencia);
     }
     
     // Eventos para registrar asistencia
@@ -164,8 +164,10 @@ function setupEventListeners() {
     if (asistenciaElements.btnGenerarReporte) {
         asistenciaElements.btnGenerarReporte.addEventListener('click', generarReporteAsistencia);
     }
+    
+    // NUEVO: Agregar botón para limpiar filtros
+    agregarBotonLimpiarFiltros();
 }
-
 // Configurar eventos de socket.io para asistencia
 function setupSocketEvents() {
     // Esperar a que el socket esté disponible
@@ -229,14 +231,104 @@ function setupSocketEvents() {
 
 // Cargar datos iniciales para la sección de asistencia
 function loadAsistenciaData() {
-    // Cargar materias en selectores
-    if (window.updateMateriasSelectors) {
-        window.updateMateriasSelectors();
+    console.log('🔄 Iniciando carga de datos de asistencia...');
+    
+    // Limpiar filtros al cargar por primera vez
+    if (asistenciaElements.asistenciaMateria) {
+        asistenciaElements.asistenciaMateria.value = '';  // Sin materia seleccionada
     }
     
-    // Cargar registros de asistencia con los filtros actuales
-    cargarRegistrosAsistencia();
+    // NO establecer fecha por defecto - dejar vacío para mostrar todos los registros
+    if (asistenciaElements.asistenciaFecha) {
+        asistenciaElements.asistenciaFecha.value = '';  // Sin fecha seleccionada
+    }
+    
+    // Verificar que las materias estén cargadas para los selectores
+    if (!window.appUtils.appState.materias || window.appUtils.appState.materias.length === 0) {
+        console.log('⚠️ Materias no cargadas, cargando primero...');
+        
+        // Cargar materias primero
+        fetch(`${window.appUtils.API_URL}/materias`)
+            .then(response => response.json())
+            .then(materias => {
+                console.log('✅ Materias cargadas:', materias.length);
+                window.appUtils.appState.materias = materias;
+                
+                // Actualizar selectores
+                updateMateriasSelectors();
+                
+                // Cargar registros de asistencia SIN filtros
+                setTimeout(() => {
+                    console.log('📄 Cargando registros de asistencia sin filtros...');
+                    cargarRegistrosAsistencia();
+                }, 300);
+            })
+            .catch(error => {
+                console.error('❌ Error al cargar materias:', error);
+                window.appUtils.showAlert('Error al cargar materias', 'danger');
+                
+                // Intentar cargar asistencias de todas formas
+                setTimeout(() => {
+                    cargarRegistrosAsistencia();
+                }, 500);
+            });
+    } else {
+        console.log('✅ Materias ya están cargadas');
+        
+        // Actualizar selectores
+        updateMateriasSelectors();
+        
+        // Cargar registros de asistencia SIN filtros
+        setTimeout(() => {
+            console.log('📄 Cargando registros de asistencia sin filtros...');
+            cargarRegistrosAsistencia();
+        }, 200);
+    }
 }
+
+
+function updateMateriasSelectors() {
+    console.log('🔄 Actualizando selectores de materias...');
+    
+    const materias = window.appUtils.appState.materias || [];
+    console.log('Materias disponibles:', materias.length);
+    
+    // Lista de selectores a actualizar
+    const selectores = [
+        { id: 'asistencia-materia', placeholder: 'Seleccionar materia...' },
+        { id: 'asistencia-modal-materia', placeholder: 'Seleccionar materia...' },
+        { id: 'asistencia-masiva-materia', placeholder: 'Seleccionar materia...' },
+        { id: 'reporte-materia', placeholder: 'Seleccionar materia...' }
+    ];
+    
+    selectores.forEach(selectorInfo => {
+        const select = document.getElementById(selectorInfo.id);
+        if (select) {
+            const currentValue = select.value;
+            
+            // Limpiar opciones existentes
+            select.innerHTML = `<option value="">${selectorInfo.placeholder}</option>`;
+            
+            // Agregar materias
+            materias.forEach(materia => {
+                const option = document.createElement('option');
+                option.value = materia._id;
+                option.textContent = `${materia.nombre} (${materia.codigo})`;
+                
+                if (materia._id === currentValue) {
+                    option.selected = true;
+                }
+                
+                select.appendChild(option);
+            });
+            
+            console.log(`✅ Selector ${selectorInfo.id} actualizado con ${materias.length} materias`);
+        } else {
+            console.warn(`⚠️ Selector ${selectorInfo.id} no encontrado`);
+        }
+    });
+}
+
 
 // Funciones para tabs
 function mostrarTabRegistro() {
@@ -264,33 +356,130 @@ function mostrarTabReportes() {
 
 // Cargar registros de asistencia según filtros
 function cargarRegistrosAsistencia() {
+    console.log('🔍 Iniciando carga de registros de asistencia...');
+    
     // Obtener valores de filtros
     const materiaId = asistenciaElements.asistenciaMateria ? asistenciaElements.asistenciaMateria.value : '';
     const fecha = asistenciaElements.asistenciaFecha ? asistenciaElements.asistenciaFecha.value : '';
     
-    // Construir URL con filtros
+    console.log('Filtros obtenidos:', { materiaId, fecha });
+    
+    // Construir URL con parámetros SOLO si tienen valores
     let url = `${window.appUtils.API_URL}/asistencia`;
     const params = [];
     
-    if (materiaId) params.push(`materia=${materiaId}`);
-    if (fecha) params.push(`fecha=${fecha}`);
+    // Solo agregar parámetros si tienen valores reales
+    if (materiaId && materiaId.trim() !== '') {
+        params.push(`materia=${encodeURIComponent(materiaId)}`);
+        console.log('✅ Agregando filtro de materia:', materiaId);
+    }
+    
+    if (fecha && fecha.trim() !== '') {
+        params.push(`fecha=${encodeURIComponent(fecha)}`);
+        console.log('✅ Agregando filtro de fecha:', fecha);
+    }
     
     if (params.length > 0) {
         url += `?${params.join('&')}`;
+        console.log('🔍 URL con filtros:', url);
+    } else {
+        console.log('📄 URL sin filtros (cargando todos los registros):', url);
+    }
+    
+    // Mostrar indicador de carga
+    if (asistenciaElements.asistenciaTableBody) {
+        asistenciaElements.asistenciaTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                        <span class="visually-hidden">Cargando...</span>
+                    </div>
+                    ${params.length > 0 ? 'Aplicando filtros y cargando registros...' : 'Cargando todos los registros de asistencia...'}
+                </td>
+            </tr>
+        `;
     }
     
     // Realizar solicitud a la API
     fetch(url)
-        .then(response => response.json())
+        .then(response => {
+            console.log('📡 Respuesta del servidor:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                url: response.url
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return response.json();
+        })
         .then(data => {
+            console.log('📊 Datos de asistencia recibidos:', {
+                esArray: Array.isArray(data),
+                cantidad: Array.isArray(data) ? data.length : 'No es array',
+                tipoData: typeof data
+            });
+            
+            // Verificar si data es un array
+            if (!Array.isArray(data)) {
+                console.error('❌ Los datos recibidos no son un array:', data);
+                throw new Error('Formato de datos incorrecto del servidor');
+            }
+            
+            // Log de muestra de datos si hay registros
+            if (data.length > 0) {
+                console.log('📄 Muestra del primer registro:', {
+                    id: data[0]._id,
+                    estudiante: data[0].estudiante?.nombre,
+                    materia: data[0].materia?.nombre,
+                    fecha: data[0].fecha,
+                    presente: data[0].presente
+                });
+            }
+            
             // Renderizar registros en la tabla
             renderizarRegistrosAsistencia(data);
+            
+            // Mostrar mensaje informativo si no se aplicaron filtros
+            if (params.length === 0 && data.length > 0) {
+                console.log(`ℹ️ Se cargaron ${data.length} registros más recientes (sin filtros)`);
+            } else if (params.length > 0) {
+                console.log(`ℹ️ Se encontraron ${data.length} registros con los filtros aplicados`);
+            }
+            
         })
         .catch(error => {
-            console.error('Error al cargar registros de asistencia:', error);
-            window.appUtils.showAlert('Error al cargar registros de asistencia', 'danger');
+            console.error('❌ Error al cargar registros de asistencia:', error);
+            
+            // Mostrar error detallado en la tabla
+            if (asistenciaElements.asistenciaTableBody) {
+                asistenciaElements.asistenciaTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-danger">
+                            <div class="mb-2">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Error al cargar registros</strong>
+                            </div>
+                            <small class="text-muted">
+                                ${error.message}
+                                <br>
+                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="cargarRegistrosAsistencia()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>
+                                    Reintentar
+                                </button>
+                            </small>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            window.appUtils.showAlert(`Error al cargar registros: ${error.message}`, 'danger');
         });
 }
+
 
 // Renderizar registros de asistencia en la tabla
 function renderizarRegistrosAsistencia(registros) {
@@ -1470,6 +1659,247 @@ function imprimirReporte() {
     
     if (btnDescargar) btnDescargar.classList.add('no-print');
     if (btnImprimir) btnImprimir.classList.add('no-print');
+}
+
+// Reemplazar en frontend/js/asistencia.js
+
+// Función mejorada para cargar registros de asistencia
+function cargarRegistrosAsistencia() {
+    console.log('🔍 Iniciando carga de registros de asistencia...');
+    
+    // Obtener valores de filtros
+    const materiaId = asistenciaElements.asistenciaMateria ? asistenciaElements.asistenciaMateria.value : '';
+    const fecha = asistenciaElements.asistenciaFecha ? asistenciaElements.asistenciaFecha.value : '';
+    
+    console.log('Filtros obtenidos:', { materiaId, fecha });
+    
+    // Construir URL con parámetros SOLO si tienen valores
+    let url = `${window.appUtils.API_URL}/asistencia`;
+    const params = [];
+    
+    // Solo agregar parámetros si tienen valores reales
+    if (materiaId && materiaId.trim() !== '') {
+        params.push(`materia=${encodeURIComponent(materiaId)}`);
+        console.log('✅ Agregando filtro de materia:', materiaId);
+    }
+    
+    if (fecha && fecha.trim() !== '') {
+        params.push(`fecha=${encodeURIComponent(fecha)}`);
+        console.log('✅ Agregando filtro de fecha:', fecha);
+    }
+    
+    if (params.length > 0) {
+        url += `?${params.join('&')}`;
+        console.log('🔍 URL con filtros:', url);
+    } else {
+        console.log('📄 URL sin filtros (cargando todos los registros):', url);
+    }
+    
+    // Mostrar indicador de carga
+    if (asistenciaElements.asistenciaTableBody) {
+        asistenciaElements.asistenciaTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                        <span class="visually-hidden">Cargando...</span>
+                    </div>
+                    ${params.length > 0 ? 'Aplicando filtros y cargando registros...' : 'Cargando todos los registros de asistencia...'}
+                </td>
+            </tr>
+        `;
+    }
+    
+    // Realizar solicitud a la API
+    fetch(url)
+        .then(response => {
+            console.log('📡 Respuesta del servidor:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                url: response.url
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return response.json();
+        })
+        .then(data => {
+            console.log('📊 Datos de asistencia recibidos:', {
+                esArray: Array.isArray(data),
+                cantidad: Array.isArray(data) ? data.length : 'No es array',
+                tipoData: typeof data
+            });
+            
+            // Verificar si data es un array
+            if (!Array.isArray(data)) {
+                console.error('❌ Los datos recibidos no son un array:', data);
+                throw new Error('Formato de datos incorrecto del servidor');
+            }
+            
+            // Log de muestra de datos si hay registros
+            if (data.length > 0) {
+                console.log('📄 Muestra del primer registro:', {
+                    id: data[0]._id,
+                    estudiante: data[0].estudiante?.nombre,
+                    materia: data[0].materia?.nombre,
+                    fecha: data[0].fecha,
+                    presente: data[0].presente
+                });
+            }
+            
+            // Renderizar registros en la tabla
+            renderizarRegistrosAsistencia(data);
+            
+            // Mostrar mensaje informativo si no se aplicaron filtros
+            if (params.length === 0 && data.length > 0) {
+                console.log(`ℹ️ Se cargaron ${data.length} registros más recientes (sin filtros)`);
+            } else if (params.length > 0) {
+                console.log(`ℹ️ Se encontraron ${data.length} registros con los filtros aplicados`);
+            }
+            
+        })
+        .catch(error => {
+            console.error('❌ Error al cargar registros de asistencia:', error);
+            
+            // Mostrar error detallado en la tabla
+            if (asistenciaElements.asistenciaTableBody) {
+                asistenciaElements.asistenciaTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center text-danger">
+                            <div class="mb-2">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                <strong>Error al cargar registros</strong>
+                            </div>
+                            <small class="text-muted">
+                                ${error.message}
+                                <br>
+                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="cargarRegistrosAsistencia()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>
+                                    Reintentar
+                                </button>
+                            </small>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            window.appUtils.showAlert(`Error al cargar registros: ${error.message}`, 'danger');
+        });
+}
+
+// Función mejorada para cargar datos iniciales de asistencia
+function loadAsistenciaData() {
+    console.log('🔄 Iniciando carga de datos de asistencia...');
+    
+    // Limpiar filtros al cargar por primera vez
+    if (asistenciaElements.asistenciaMateria) {
+        asistenciaElements.asistenciaMateria.value = '';  // Sin materia seleccionada
+    }
+    
+    // NO establecer fecha por defecto - dejar vacío para mostrar todos los registros
+    if (asistenciaElements.asistenciaFecha) {
+        asistenciaElements.asistenciaFecha.value = '';  // Sin fecha seleccionada
+    }
+    
+    // Verificar que las materias estén cargadas para los selectores
+    if (!window.appUtils.appState.materias || window.appUtils.appState.materias.length === 0) {
+        console.log('⚠️ Materias no cargadas, cargando primero...');
+        
+        // Cargar materias primero
+        fetch(`${window.appUtils.API_URL}/materias`)
+            .then(response => response.json())
+            .then(materias => {
+                console.log('✅ Materias cargadas:', materias.length);
+                window.appUtils.appState.materias = materias;
+                
+                // Actualizar selectores
+                updateMateriasSelectors();
+                
+                // Cargar registros de asistencia SIN filtros
+                setTimeout(() => {
+                    console.log('📄 Cargando registros de asistencia sin filtros...');
+                    cargarRegistrosAsistencia();
+                }, 300);
+            })
+            .catch(error => {
+                console.error('❌ Error al cargar materias:', error);
+                window.appUtils.showAlert('Error al cargar materias', 'danger');
+                
+                // Intentar cargar asistencias de todas formas
+                setTimeout(() => {
+                    cargarRegistrosAsistencia();
+                }, 500);
+            });
+    } else {
+        console.log('✅ Materias ya están cargadas');
+        
+        // Actualizar selectores
+        updateMateriasSelectors();
+        
+        // Cargar registros de asistencia SIN filtros
+        setTimeout(() => {
+            console.log('📄 Cargando registros de asistencia sin filtros...');
+            cargarRegistrosAsistencia();
+        }, 200);
+    }
+}
+
+// Función específica para aplicar filtros (llamada por el botón "Filtrar")
+function aplicarFiltrosAsistencia() {
+    console.log('🔍 Aplicando filtros de asistencia...');
+    
+    const materiaSeleccionada = asistenciaElements.asistenciaMateria ? asistenciaElements.asistenciaMateria.value : '';
+    const fechaSeleccionada = asistenciaElements.asistenciaFecha ? asistenciaElements.asistenciaFecha.value : '';
+    
+    if (!materiaSeleccionada && !fechaSeleccionada) {
+        window.appUtils.showAlert('Seleccione al menos un filtro (materia o fecha)', 'warning');
+        return;
+    }
+    
+    // Cargar con filtros
+    cargarRegistrosAsistencia();
+}
+
+// Función para limpiar filtros
+function limpiarFiltrosAsistencia() {
+    console.log('🗑️ Limpiando filtros de asistencia...');
+    
+    if (asistenciaElements.asistenciaMateria) {
+        asistenciaElements.asistenciaMateria.value = '';
+    }
+    
+    if (asistenciaElements.asistenciaFecha) {
+        asistenciaElements.asistenciaFecha.value = '';
+    }
+    
+    // Recargar sin filtros
+    cargarRegistrosAsistencia();
+    
+    window.appUtils.showAlert('Filtros eliminados - mostrando todos los registros', 'info');
+}
+
+function agregarBotonLimpiarFiltros() {
+    // Buscar el botón de filtrar
+    const btnFiltrar = asistenciaElements.btnFiltrarAsistencia;
+    if (btnFiltrar && !document.getElementById('btn-limpiar-filtros')) {
+        // Crear botón de limpiar filtros
+        const btnLimpiar = document.createElement('button');
+        btnLimpiar.type = 'button';
+        btnLimpiar.id = 'btn-limpiar-filtros';
+        btnLimpiar.className = 'btn btn-outline-secondary ms-2';
+        btnLimpiar.innerHTML = '<i class="bi bi-x-circle"></i> Limpiar';
+        btnLimpiar.title = 'Limpiar filtros y mostrar todos los registros';
+        
+        // Insertar después del botón de filtrar
+        btnFiltrar.parentNode.insertBefore(btnLimpiar, btnFiltrar.nextSibling);
+        
+        // Agregar event listener
+        btnLimpiar.addEventListener('click', limpiarFiltrosAsistencia);
+        
+        console.log('✅ Botón de limpiar filtros agregado');
+    }
 }
 
 // Agregar funciones al objeto global

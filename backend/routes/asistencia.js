@@ -5,17 +5,36 @@ const { Asistencia, Estudiante, Materia } = require('../database');
 // Obtener todas las asistencias (con opciones de filtrado)
 router.get('/', async (req, res) => {
   try {
+    console.log('📥 [ASISTENCIA] Solicitud GET /asistencia recibida');
+    console.log('📥 [ASISTENCIA] Query parameters:', req.query);
+    
     const { materia, estudiante, fecha, presente } = req.query;
     
-    // Construir filtro basado en parámetros
+    // Construir filtro basado en parámetros - SOLO si se proporcionan
     const filtro = {};
+    let tieneParametros = false;
     
-    if (materia) filtro.materia = materia;
-    if (estudiante) filtro.estudiante = estudiante;
-    if (presente !== undefined) filtro.presente = presente === 'true';
+    if (materia && materia.trim() !== '') {
+      console.log('🔍 [ASISTENCIA] Aplicando filtro por materia:', materia);
+      filtro.materia = materia;
+      tieneParametros = true;
+    }
     
-    // Filtro de fecha
-    if (fecha) {
+    if (estudiante && estudiante.trim() !== '') {
+      console.log('🔍 [ASISTENCIA] Aplicando filtro por estudiante:', estudiante);
+      filtro.estudiante = estudiante;
+      tieneParametros = true;
+    }
+    
+    if (presente !== undefined && presente !== '') {
+      console.log('🔍 [ASISTENCIA] Aplicando filtro por presente:', presente);
+      filtro.presente = presente === 'true';
+      tieneParametros = true;
+    }
+    
+    // Filtro de fecha - SOLO si se proporciona
+    if (fecha && fecha.trim() !== '') {
+      console.log('🔍 [ASISTENCIA] Aplicando filtro por fecha:', fecha);
       const fechaInicio = new Date(fecha);
       fechaInicio.setHours(0, 0, 0, 0);
       
@@ -23,16 +42,109 @@ router.get('/', async (req, res) => {
       fechaFin.setHours(23, 59, 59, 999);
       
       filtro.fecha = { $gte: fechaInicio, $lte: fechaFin };
+      tieneParametros = true;
+      
+      console.log('🔍 [ASISTENCIA] Rango de fechas configurado:', {
+        inicio: fechaInicio.toISOString(),
+        fin: fechaFin.toISOString()
+      });
     }
+    
+    if (tieneParametros) {
+      console.log('🔍 [ASISTENCIA] Filtros aplicados:', JSON.stringify(filtro, null, 2));
+    } else {
+      console.log('🔍 [ASISTENCIA] Sin filtros - mostrando todos los registros');
+    }
+    
+    // Realizar consulta
+    console.log('🔄 [ASISTENCIA] Ejecutando consulta a MongoDB...');
+    
+    // Configurar límite por defecto para evitar cargar demasiados registros
+    const limite = tieneParametros ? 1000 : 100; // Sin filtros, limitar a 100 registros más recientes
     
     const asistencias = await Asistencia.find(filtro)
       .populate('estudiante', 'nombre codigo programaAcademico')
       .populate('materia', 'nombre codigo')
-      .sort({ fecha: -1 });
+      .sort({ fecha: -1 }) // Más recientes primero
+      .limit(limite);
     
+    console.log('📊 [ASISTENCIA] Resultado de la consulta:');
+    console.log('   - Total de registros encontrados:', asistencias.length);
+    console.log('   - Límite aplicado:', limite);
+    
+    if (asistencias.length > 0) {
+      console.log('   - Registro más reciente:', {
+        id: asistencias[0]._id,
+        estudiante: asistencias[0].estudiante?.nombre || 'Sin estudiante',
+        materia: asistencias[0].materia?.nombre || 'Sin materia',
+        fecha: asistencias[0].fecha?.toISOString(),
+        presente: asistencias[0].presente
+      });
+      
+      console.log('   - Registro más antiguo:', {
+        id: asistencias[asistencias.length - 1]._id,
+        estudiante: asistencias[asistencias.length - 1].estudiante?.nombre || 'Sin estudiante',
+        materia: asistencias[asistencias.length - 1].materia?.nombre || 'Sin materia',
+        fecha: asistencias[asistencias.length - 1].fecha?.toISOString(),
+        presente: asistencias[asistencias.length - 1].presente
+      });
+      
+      // Mostrar estadísticas
+      const presentes = asistencias.filter(a => a.presente).length;
+      const ausentes = asistencias.length - presentes;
+      console.log('   - Estadísticas: Presentes:', presentes, ', Ausentes:', ausentes);
+      
+      // Mostrar distribución por materias
+      const materias = {};
+      asistencias.forEach(a => {
+        const matNombre = a.materia?.nombre || 'Sin materia';
+        materias[matNombre] = (materias[matNombre] || 0) + 1;
+      });
+      console.log('   - Distribución por materias:', materias);
+      
+    } else {
+      console.log('   - No se encontraron registros');
+      
+      // Verificar si hay registros en total
+      const totalRegistros = await Asistencia.countDocuments();
+      console.log('   - Total de registros en la colección:', totalRegistros);
+      
+      if (totalRegistros === 0) {
+        console.log('   ⚠️ La colección de asistencias está completamente vacía');
+        console.log('   💡 Sugerencia: Registre algunas asistencias para ver datos aquí');
+      } else {
+        console.log('   ⚠️ Hay registros en la colección pero no coinciden con los filtros');
+        
+        // Mostrar una muestra de los registros existentes
+        const muestra = await Asistencia.find({})
+          .populate('estudiante', 'nombre')
+          .populate('materia', 'nombre')
+          .limit(3);
+        
+        console.log('   📄 Muestra de registros existentes:');
+        muestra.forEach((reg, index) => {
+          console.log(`     ${index + 1}. ${reg.estudiante?.nombre || 'Sin estudiante'} - ${reg.materia?.nombre || 'Sin materia'} - ${reg.fecha?.toISOString()} - ${reg.presente ? 'Presente' : 'Ausente'}`);
+        });
+      }
+    }
+    
+    console.log('✅ [ASISTENCIA] Enviando respuesta al cliente...');
     res.json(asistencias);
+    
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ [ASISTENCIA] Error en GET /asistencia:', error);
+    console.error('❌ [ASISTENCIA] Stack trace:', error.stack);
+    
+    // Información adicional de debug
+    console.error('❌ [ASISTENCIA] Información adicional del error:');
+    console.error('   - Nombre del error:', error.name);
+    console.error('   - Código del error:', error.code);
+    console.error('   - Query original:', req.query);
+    
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Verifique los logs del servidor para más información'
+    });
   }
 });
 
@@ -181,8 +293,7 @@ router.post('/huella', async (req, res) => {
     const fechaInicio = new Date(fechaActual);
     fechaInicio.setHours(0, 0, 0, 0);
 
-    const fechaFin = new Date(fechaActual);
-    fechaFin.setHours(23, 59, 59, 999);
+    const fechaFin = new Date(fechaActual.getTime() + 3 * 60 * 60 * 1000); // 3 horas después
 
     const asistenciaExistente = await Asistencia.findOne({
       estudiante: estudiante._id,

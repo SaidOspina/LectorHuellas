@@ -151,26 +151,45 @@
                 <div class="card-body">
                     <!-- Tab de Registro de Asistencia -->
                     <div id="registro-tab-content">
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Materia</label>
-                                <select class="form-select" id="asistencia-materia">
-                                    <option value="">Seleccionar materia...</option>
-                                </select>
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Fecha</label>
-                                <input type="date" class="form-control" id="asistencia-fecha">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">&nbsp;</label>
-                                <div class="d-grid">
-                                    <button type="button" class="btn btn-primary" id="btn-filtrar-asistencia">
-                                        <i class="bi bi-search"></i> Filtrar
-                                    </button>
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <label class="form-label">Materia</label>
+                                    <select class="form-select" id="asistencia-materia">
+                                        <option value="">Todas las materias</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Fecha</label>
+                                    <input type="date" class="form-control" id="asistencia-fecha" 
+                                        title="Dejar vacío para mostrar todas las fechas">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button type="button" class="btn btn-primary" id="btn-filtrar-asistencia">
+                                            <i class="bi bi-search"></i> Aplicar Filtros
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button type="button" class="btn btn-outline-secondary" id="btn-limpiar-filtros">
+                                            <i class="bi bi-x-circle"></i> Mostrar Todos
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+
+                            <div class="row mb-2">
+                                <div class="col-12">
+                                    <small class="text-muted">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        <strong>Filtros:</strong> Deje los campos vacíos para mostrar todos los registros. 
+                                        Use los filtros para buscar registros específicos por materia y/o fecha.
+                                    </small>
+                                </div>
+                            </div>
                         <div class="table-responsive">
                             <table class="table table-hover" id="asistencia-table">
                                 <thead class="table-light">
