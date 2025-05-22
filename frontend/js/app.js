@@ -250,22 +250,27 @@ function handleFingerprintScan(data) {
     const huellaID = data.id;
     console.log(`👆 Procesando huella escaneada ID: ${huellaID}`);
     
-    // Verificar si hay un proceso de registro de huella en curso
+    // Verificar si hay un proceso de registro de huella en curso (estudiantes.js)
     if (window.registroHuellaEnProgreso) {
-        console.log('🔄 Proceso de registro de huella en curso, delegando...');
+        console.log('🔄 Proceso de registro de huella en curso, delegando a estudiantes.js...');
         return; // Los eventos específicos de huella se manejan en estudiantes.js
     }
     
-    // Verificar si hay un proceso de asistencia por huella en curso
+    // CORRECCIÓN: Verificar correctamente el proceso de asistencia por huella
     if (window.asistenciaPorHuellaEnProgreso && window.materiaAsistenciaActual) {
-        console.log('📝 Proceso de asistencia por huella en curso, delegando...');
-        if (typeof handleAsistenciaHuella === 'function') {
+        console.log('📝 Proceso de asistencia por huella en curso, delegando a asistencia.js...');
+        if (typeof window.handleAsistenciaHuella === 'function') {
+            window.handleAsistenciaHuella(huellaID);
+        } else if (typeof handleAsistenciaHuella === 'function') {
             handleAsistenciaHuella(huellaID);
+        } else {
+            console.error('❌ Función handleAsistenciaHuella no encontrada');
         }
         return;
     }
     
     // Si no hay procesos activos, mostrar información
+    console.log('ℹ️ Huella detectada sin proceso activo');
     showAlert(`Huella detectada (ID: ${huellaID}). No hay procesos activos.`, 'info');
 }
 
