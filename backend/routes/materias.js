@@ -2,68 +2,104 @@ const express = require('express');
 const router = express.Router();
 const { Materia, Estudiante, Asistencia } = require('../database');
 
-// Obtener todas las materias (activas por defecto)
+// Obtener todas las materias (activas por defecto) - MODIFICADO: Solo del docente actual
 router.get('/', async (req, res) => {
   try {
     const estado = req.query.estado || 'activo';
-    const materias = await Materia.find({ estado });
+    
+    // Filtrar solo las materias creadas por el docente actual
+    const materias = await Materia.find({ 
+      estado,
+      creadoPor: req.user._id 
+    }).populate('creadoPor', 'nombre apellido username');
+    
     res.json(materias);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener una materia por ID
+// Obtener una materia por ID - MODIFICADO: Verificar propiedad
 router.get('/:id', async (req, res) => {
   try {
-    const materia = await Materia.findById(req.params.id);
+    const materia = await Materia.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    }).populate('creadoPor', 'nombre apellido username');
+    
     if (!materia) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para acceder' });
     }
+    
     res.json(materia);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Crear nueva materia
+// Crear nueva materia - MODIFICADO: Asignar docente creador
 router.post('/', async (req, res) => {
   try {
     const { nombre, codigo, descripcion } = req.body;
     
-    // Verificar si ya existe una materia con ese código
-    const materiaExistente = await Materia.findOne({ codigo });
+    // Verificar si ya existe una materia con ese código para este docente
+    const materiaExistente = await Materia.findOne({ 
+      codigo, 
+      creadoPor: req.user._id 
+    });
+    
     if (materiaExistente) {
-      return res.status(400).json({ error: 'Ya existe una materia con ese código' });
+      return res.status(400).json({ error: 'Ya tiene una materia con ese código' });
     }
     
     const nuevaMateria = new Materia({
       nombre,
       codigo,
-      descripcion
+      descripcion,
+      creadoPor: req.user._id
     });
     
     const materiaSaved = await nuevaMateria.save();
+    
+    // Poblar información del creador para la respuesta
+    await materiaSaved.populate('creadoPor', 'nombre apellido username');
+    
     res.status(201).json(materiaSaved);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    // Manejar error de clave duplicada
+    if (error.code === 11000) {
+      res.status(400).json({ error: 'Ya tiene una materia con ese código' });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
-// Actualizar materia
+// Actualizar materia - MODIFICADO: Verificar propiedad
 router.put('/:id', async (req, res) => {
   try {
     const { nombre, codigo, descripcion } = req.body;
     
-    // Si se cambia el código, verificar que no exista otro con ese código
-    if (codigo) {
-      const materiaExistente = await Materia.findOne({ 
+    // Verificar que la materia existe y pertenece al docente
+    const materiaExistente = await Materia.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
+    if (!materiaExistente) {
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para modificarla' });
+    }
+    
+    // Si se cambia el código, verificar que no exista otro con ese código para este docente
+    if (codigo && codigo !== materiaExistente.codigo) {
+      const codigoExistente = await Materia.findOne({ 
         codigo, 
-        _id: { $ne: req.params.id } 
+        creadoPor: req.user._id,
+        _id: { $ne: req.params.id }
       });
       
-      if (materiaExistente) {
-        return res.status(400).json({ error: 'Ya existe otra materia con ese código' });
+      if (codigoExistente) {
+        return res.status(400).json({ error: 'Ya tiene otra materia con ese código' });
       }
     }
     
@@ -71,11 +107,7 @@ router.put('/:id', async (req, res) => {
       req.params.id,
       { nombre, codigo, descripcion },
       { new: true }
-    );
-    
-    if (!materiaActualizada) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
-    }
+    ).populate('creadoPor', 'nombre apellido username');
     
     res.json(materiaActualizada);
   } catch (error) {
@@ -83,17 +115,20 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Mover materia a la papelera
+// Mover materia a la papelera - MODIFICADO: Verificar propiedad
 router.patch('/:id/papelera', async (req, res) => {
   try {
-    const materiaActualizada = await Materia.findByIdAndUpdate(
-      req.params.id,
+    const materiaActualizada = await Materia.findOneAndUpdate(
+      { 
+        _id: req.params.id,
+        creadoPor: req.user._id
+      },
       { estado: 'papelera' },
       { new: true }
-    );
+    ).populate('creadoPor', 'nombre apellido username');
     
     if (!materiaActualizada) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para modificarla' });
     }
     
     res.json(materiaActualizada);
@@ -102,17 +137,20 @@ router.patch('/:id/papelera', async (req, res) => {
   }
 });
 
-// Restaurar materia de la papelera
+// Restaurar materia de la papelera - MODIFICADO: Verificar propiedad
 router.patch('/:id/restaurar', async (req, res) => {
   try {
-    const materiaActualizada = await Materia.findByIdAndUpdate(
-      req.params.id,
+    const materiaActualizada = await Materia.findOneAndUpdate(
+      { 
+        _id: req.params.id,
+        creadoPor: req.user._id
+      },
       { estado: 'activo' },
       { new: true }
-    );
+    ).populate('creadoPor', 'nombre apellido username');
     
     if (!materiaActualizada) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para modificarla' });
     }
     
     res.json(materiaActualizada);
@@ -121,10 +159,20 @@ router.patch('/:id/restaurar', async (req, res) => {
   }
 });
 
-// Eliminar materia permanentemente
+// Eliminar materia permanentemente - MODIFICADO: Verificar propiedad
 router.delete('/:id', async (req, res) => {
   try {
-    // Primero verificamos si hay estudiantes inscritos o asistencias
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
+    if (!materia) {
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para eliminarla' });
+    }
+    
+    // Verificar si hay asistencias asociadas
     const asistencias = await Asistencia.find({ materia: req.params.id });
     
     if (asistencias.length > 0) {
@@ -133,16 +181,15 @@ router.delete('/:id', async (req, res) => {
       });
     }
     
-    // Si no hay impedimentos, eliminamos la materia
-    const materiaEliminada = await Materia.findByIdAndDelete(req.params.id);
+    // Eliminar la materia
+    await Materia.findByIdAndDelete(req.params.id);
     
-    if (!materiaEliminada) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
-    }
-    
-    // Eliminamos la referencia de esta materia en los estudiantes
+    // Eliminar la referencia de esta materia en los estudiantes del docente
     await Estudiante.updateMany(
-      { materias: req.params.id },
+      { 
+        materias: req.params.id,
+        creadoPor: req.user._id
+      },
       { $pull: { materias: req.params.id } }
     );
     
@@ -152,12 +199,23 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Obtener estudiantes inscritos en una materia
+// Obtener estudiantes inscritos en una materia - MODIFICADO: Verificar propiedad
 router.get('/:id/estudiantes', async (req, res) => {
   try {
-    const estudiantes = await Estudiante.find({
-      materias: req.params.id
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
     });
+    
+    if (!materia) {
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para acceder' });
+    }
+    
+    const estudiantes = await Estudiante.find({
+      materias: req.params.id,
+      creadoPor: req.user._id
+    }).populate('creadoPor', 'nombre apellido username');
     
     res.json(estudiantes);
   } catch (error) {
@@ -165,21 +223,32 @@ router.get('/:id/estudiantes', async (req, res) => {
   }
 });
 
-// Descargar reporte de asistencia de una materia
+// Descargar reporte de asistencia de una materia - MODIFICADO: Verificar propiedad
 router.get('/:id/asistencia/reporte', async (req, res) => {
   try {
-    const materia = await Materia.findById(req.params.id);
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
     if (!materia) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
+      return res.status(404).json({ error: 'Materia no encontrada o no tiene permisos para acceder' });
     }
     
-    // Obtener todos los estudiantes de la materia
-    const estudiantes = await Estudiante.find({ materias: req.params.id });
+    // Obtener todos los estudiantes de la materia (del mismo docente)
+    const estudiantes = await Estudiante.find({ 
+      materias: req.params.id,
+      creadoPor: req.user._id
+    });
     
-    // Obtener todas las asistencias de la materia
-    const asistencias = await Asistencia.find({ materia: req.params.id })
-      .populate('estudiante')
-      .sort({ fecha: 1 });
+    // Obtener todas las asistencias de la materia (registradas por el mismo docente)
+    const asistencias = await Asistencia.find({ 
+      materia: req.params.id,
+      registradoPor: req.user._id
+    })
+    .populate('estudiante')
+    .sort({ fecha: 1 });
     
     // Agrupar asistencias por estudiante y fecha
     const reporte = [];

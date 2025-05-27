@@ -2,161 +2,99 @@ const express = require('express');
 const router = express.Router();
 const { Asistencia, Estudiante, Materia } = require('../database');
 
-// Obtener todas las asistencias (con opciones de filtrado)
+// Obtener todas las asistencias - MODIFICADO: Solo del docente actual
 router.get('/', async (req, res) => {
   try {
-    console.log('📥 [ASISTENCIA] Solicitud GET /asistencia recibida');
-    console.log('📥 [ASISTENCIA] Query parameters:', req.query);
+    const { materiaId, estudianteId, fecha, fechaInicio, fechaFin, limite } = req.query;
     
-    const { materia, estudiante, fecha, presente } = req.query;
+    // Construir filtros base
+    let filtros = { 
+      registradoPor: req.user._id 
+    };
     
-    // Construir filtro basado en parámetros - SOLO si se proporcionan
-    const filtro = {};
-    let tieneParametros = false;
-    
-    if (materia && materia.trim() !== '') {
-      console.log('🔍 [ASISTENCIA] Aplicando filtro por materia:', materia);
-      filtro.materia = materia;
-      tieneParametros = true;
-    }
-    
-    if (estudiante && estudiante.trim() !== '') {
-      console.log('🔍 [ASISTENCIA] Aplicando filtro por estudiante:', estudiante);
-      filtro.estudiante = estudiante;
-      tieneParametros = true;
-    }
-    
-    if (presente !== undefined && presente !== '') {
-      console.log('🔍 [ASISTENCIA] Aplicando filtro por presente:', presente);
-      filtro.presente = presente === 'true';
-      tieneParametros = true;
-    }
-    
-    // Filtro de fecha - SOLO si se proporciona
-    if (fecha && fecha.trim() !== '') {
-      console.log('🔍 [ASISTENCIA] Aplicando filtro por fecha:', fecha);
-      const fechaInicio = new Date(fecha);
-      fechaInicio.setHours(0, 0, 0, 0);
-      
-      const fechaFin = new Date(fecha);
-      fechaFin.setHours(23, 59, 59, 999);
-      
-      filtro.fecha = { $gte: fechaInicio, $lte: fechaFin };
-      tieneParametros = true;
-      
-      console.log('🔍 [ASISTENCIA] Rango de fechas configurado:', {
-        inicio: fechaInicio.toISOString(),
-        fin: fechaFin.toISOString()
-      });
-    }
-    
-    if (tieneParametros) {
-      console.log('🔍 [ASISTENCIA] Filtros aplicados:', JSON.stringify(filtro, null, 2));
-    } else {
-      console.log('🔍 [ASISTENCIA] Sin filtros - mostrando todos los registros');
-    }
-    
-    // Realizar consulta
-    console.log('🔄 [ASISTENCIA] Ejecutando consulta a MongoDB...');
-    
-    // Configurar límite por defecto para evitar cargar demasiados registros
-    const limite = tieneParametros ? 1000 : 100; // Sin filtros, limitar a 100 registros más recientes
-    
-    const asistencias = await Asistencia.find(filtro)
-      .populate('estudiante', 'nombre codigo programaAcademico')
-      .populate('materia', 'nombre codigo')
-      .sort({ fecha: -1 }) // Más recientes primero
-      .limit(limite);
-    
-    console.log('📊 [ASISTENCIA] Resultado de la consulta:');
-    console.log('   - Total de registros encontrados:', asistencias.length);
-    console.log('   - Límite aplicado:', limite);
-    
-    if (asistencias.length > 0) {
-      console.log('   - Registro más reciente:', {
-        id: asistencias[0]._id,
-        estudiante: asistencias[0].estudiante?.nombre || 'Sin estudiante',
-        materia: asistencias[0].materia?.nombre || 'Sin materia',
-        fecha: asistencias[0].fecha?.toISOString(),
-        presente: asistencias[0].presente
+    // Filtrar por materia si se especifica y verificar propiedad
+    if (materiaId) {
+      const materia = await Materia.findOne({
+        _id: materiaId,
+        creadoPor: req.user._id
       });
       
-      console.log('   - Registro más antiguo:', {
-        id: asistencias[asistencias.length - 1]._id,
-        estudiante: asistencias[asistencias.length - 1].estudiante?.nombre || 'Sin estudiante',
-        materia: asistencias[asistencias.length - 1].materia?.nombre || 'Sin materia',
-        fecha: asistencias[asistencias.length - 1].fecha?.toISOString(),
-        presente: asistencias[asistencias.length - 1].presente
-      });
-      
-      // Mostrar estadísticas
-      const presentes = asistencias.filter(a => a.presente).length;
-      const ausentes = asistencias.length - presentes;
-      console.log('   - Estadísticas: Presentes:', presentes, ', Ausentes:', ausentes);
-      
-      // Mostrar distribución por materias
-      const materias = {};
-      asistencias.forEach(a => {
-        const matNombre = a.materia?.nombre || 'Sin materia';
-        materias[matNombre] = (materias[matNombre] || 0) + 1;
-      });
-      console.log('   - Distribución por materias:', materias);
-      
-    } else {
-      console.log('   - No se encontraron registros');
-      
-      // Verificar si hay registros en total
-      const totalRegistros = await Asistencia.countDocuments();
-      console.log('   - Total de registros en la colección:', totalRegistros);
-      
-      if (totalRegistros === 0) {
-        console.log('   ⚠️ La colección de asistencias está completamente vacía');
-        console.log('   💡 Sugerencia: Registre algunas asistencias para ver datos aquí');
-      } else {
-        console.log('   ⚠️ Hay registros en la colección pero no coinciden con los filtros');
-        
-        // Mostrar una muestra de los registros existentes
-        const muestra = await Asistencia.find({})
-          .populate('estudiante', 'nombre')
-          .populate('materia', 'nombre')
-          .limit(3);
-        
-        console.log('   📄 Muestra de registros existentes:');
-        muestra.forEach((reg, index) => {
-          console.log(`     ${index + 1}. ${reg.estudiante?.nombre || 'Sin estudiante'} - ${reg.materia?.nombre || 'Sin materia'} - ${reg.fecha?.toISOString()} - ${reg.presente ? 'Presente' : 'Ausente'}`);
-        });
+      if (!materia) {
+        return res.status(400).json({ error: 'Materia no encontrada o no le pertenece' });
       }
+      
+      filtros.materia = materiaId;
     }
     
-    console.log('✅ [ASISTENCIA] Enviando respuesta al cliente...');
+    // Filtrar por estudiante si se especifica y verificar propiedad
+    if (estudianteId) {
+      const estudiante = await Estudiante.findOne({
+        _id: estudianteId,
+        creadoPor: req.user._id
+      });
+      
+      if (!estudiante) {
+        return res.status(400).json({ error: 'Estudiante no encontrado o no le pertenece' });
+      }
+      
+      filtros.estudiante = estudianteId;
+    }
+    
+    // Filtros de fecha
+    if (fecha) {
+      const fechaObj = new Date(fecha);
+      const fechaInicio = new Date(fechaObj.setHours(0, 0, 0, 0));
+      const fechaFin = new Date(fechaObj.setHours(23, 59, 59, 999));
+      filtros.fecha = { $gte: fechaInicio, $lte: fechaFin };
+    } else if (fechaInicio || fechaFin) {
+      filtros.fecha = {};
+      if (fechaInicio) filtros.fecha.$gte = new Date(fechaInicio);
+      if (fechaFin) filtros.fecha.$lte = new Date(fechaFin);
+    }
+    
+    let query = Asistencia.find(filtros)
+      .populate({
+        path: 'estudiante',
+        match: { creadoPor: req.user._id }
+      })
+      .populate({
+        path: 'materia',
+        match: { creadoPor: req.user._id }
+      })
+      .populate('registradoPor', 'nombre apellido username')
+      .sort({ fecha: -1 });
+    
+    if (limite) {
+      query = query.limit(parseInt(limite));
+    }
+    
+    const asistencias = await query;
+    
     res.json(asistencias);
-    
   } catch (error) {
-    console.error('❌ [ASISTENCIA] Error en GET /asistencia:', error);
-    console.error('❌ [ASISTENCIA] Stack trace:', error.stack);
-    
-    // Información adicional de debug
-    console.error('❌ [ASISTENCIA] Información adicional del error:');
-    console.error('   - Nombre del error:', error.name);
-    console.error('   - Código del error:', error.code);
-    console.error('   - Query original:', req.query);
-    
-    res.status(500).json({ 
-      error: error.message,
-      details: 'Verifique los logs del servidor para más información'
-    });
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener asistencia por ID
+// Obtener una asistencia por ID - MODIFICADO: Verificar propiedad
 router.get('/:id', async (req, res) => {
   try {
-    const asistencia = await Asistencia.findById(req.params.id)
-      .populate('estudiante', 'nombre codigo programaAcademico')
-      .populate('materia', 'nombre codigo');
+    const asistencia = await Asistencia.findOne({
+      _id: req.params.id,
+      registradoPor: req.user._id
+    })
+    .populate({
+      path: 'estudiante',
+      match: { creadoPor: req.user._id }
+    })
+    .populate({
+      path: 'materia',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('registradoPor', 'nombre apellido username');
     
     if (!asistencia) {
-      return res.status(404).json({ error: 'Registro de asistencia no encontrado' });
+      return res.status(404).json({ error: 'Asistencia no encontrada o no tiene permisos para acceder' });
     }
     
     res.json(asistencia);
@@ -165,112 +103,160 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Registrar asistencia
+// Registrar asistencia manual - MODIFICADO: Verificar propiedad y asignar docente
 router.post('/', async (req, res) => {
   try {
-    const { estudiante, materia, fecha, presente } = req.body;
+    const { estudianteId, materiaId, presente = true, fecha } = req.body;
     
-    // Verificar si el estudiante existe
-    const estudianteExiste = await Estudiante.findById(estudiante);
-    if (!estudianteExiste) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: estudianteId,
+      creadoPor: req.user._id
+    });
+    
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no le pertenece' });
     }
     
-    // Verificar si la materia existe y está activa
-    const materiaExiste = await Materia.findOne({ _id: materia, estado: 'activo' });
-    if (!materiaExiste) {
-      return res.status(404).json({ error: 'Materia no encontrada o está en papelera' });
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({ 
+      _id: materiaId,
+      estado: 'activo',
+      creadoPor: req.user._id
+    });
+    
+    if (!materia) {
+      return res.status(404).json({ error: 'Materia no encontrada, está en papelera, o no le pertenece' });
     }
     
-    // Verificar si el estudiante está inscrito en la materia
-    if (!estudianteExiste.materias.includes(materia)) {
-      return res.status(400).json({
+    // Verificar que el estudiante está inscrito en la materia
+    if (!estudiante.materias.includes(materiaId)) {
+      return res.status(400).json({ error: 'El estudiante no está inscrito en esta materia' });
+    }
+    
+    // Determinar fecha de asistencia
+    const fechaAsistencia = fecha ? new Date(fecha) : new Date();
+    
+    // Verificar si ya existe un registro de asistencia para este estudiante, materia y fecha
+    const fechaStr = fechaAsistencia.toISOString().split('T')[0];
+    const inicioDelDia = new Date(fechaStr + 'T00:00:00.000Z');
+    const finDelDia = new Date(fechaStr + 'T23:59:59.999Z');
+    
+    const asistenciaExistente = await Asistencia.findOne({
+      estudiante: estudianteId,
+      materia: materiaId,
+      registradoPor: req.user._id,
+      fecha: {
+        $gte: inicioDelDia,
+        $lte: finDelDia
+      }
+    });
+    
+    if (asistenciaExistente) {
+      return res.status(400).json({ 
+        error: 'Ya existe un registro de asistencia para este estudiante en esta materia hoy',
+        asistencia: asistenciaExistente
+      });
+    }
+    
+    const nuevaAsistencia = new Asistencia({
+      estudiante: estudianteId,
+      materia: materiaId,
+      presente,
+      fecha: fechaAsistencia,
+      registradoPor: req.user._id
+    });
+    
+    const asistenciaSaved = await nuevaAsistencia.save();
+    
+    // Poblamos los datos para la respuesta
+    const asistenciaCompleta = await Asistencia.findById(asistenciaSaved._id)
+      .populate({
+        path: 'estudiante',
+        match: { creadoPor: req.user._id }
+      })
+      .populate({
+        path: 'materia',
+        match: { creadoPor: req.user._id }
+      })
+      .populate('registradoPor', 'nombre apellido username');
+    
+    res.status(201).json(asistenciaCompleta);
+  } catch (error) {
+    if (error.code === 11000) {
+      res.status(400).json({ error: 'Ya existe un registro de asistencia para este estudiante en esta materia en esta fecha' });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+// Registrar asistencia por huella dactilar - MODIFICADO: Verificar propiedad
+router.post('/huella', async (req, res) => {
+  try {
+    const { huellaID, materiaId, presente = true } = req.body;
+    
+    if (!huellaID || !materiaId) {
+      return res.status(400).json({ error: 'Se requiere huellaID y materiaId' });
+    }
+    
+    // Buscar estudiante por huella que pertenezca al docente
+    const estudiante = await Estudiante.findOne({ 
+      huellaID,
+      creadoPor: req.user._id
+    });
+    
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado con esa huella o no le pertenece' });
+    }
+    
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({ 
+      _id: materiaId,
+      estado: 'activo',
+      creadoPor: req.user._id
+    });
+    
+    if (!materia) {
+      return res.status(404).json({ error: 'Materia no encontrada, está en papelera, o no le pertenece' });
+    }
+    
+    // Verificar que el estudiante está inscrito en la materia
+    if (!estudiante.materias.includes(materiaId)) {
+      return res.status(400).json({ 
         error: 'El estudiante no está inscrito en esta materia',
         estudiante: {
-          id: estudianteExiste._id,
-          nombre: estudianteExiste.nombre,
-          codigo: estudianteExiste.codigo
+          id: estudiante._id,
+          nombre: estudiante.nombre,
+          codigo: estudiante.codigo
+        },
+        materia: {
+          id: materia._id,
+          nombre: materia.nombre,
+          codigo: materia.codigo
         }
       });
     }
     
-    // Si no se proporciona una fecha, usar la fecha actual
-    const fechaAsistencia = fecha ? new Date(fecha) : new Date();
-    
-    // Verificar si ya existe un registro para este estudiante, materia y fecha
-    const fechaInicio = new Date(fechaAsistencia);
-    fechaInicio.setHours(0, 0, 0, 0);
-    
-    const fechaFin = new Date(fechaAsistencia.getTime() + 3 * 60 * 60 * 1000); 
+    // Verificar si ya existe un registro de asistencia para hoy
+    const hoy = new Date();
+    const inicioDelDia = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    const finDelDia = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59, 999);
     
     const asistenciaExistente = await Asistencia.findOne({
-      estudiante,
-      materia,
-      fecha: { $gte: fechaInicio, $lte: fechaFin }
+      estudiante: estudiante._id,
+      materia: materiaId,
+      registradoPor: req.user._id,
+      fecha: {
+        $gte: inicioDelDia,
+        $lte: finDelDia
+      }
     });
     
     if (asistenciaExistente) {
-
-      
-      return res.json({
-        mensaje: 'Registro de asistencia repetido',
-        asistencia: asistenciaActualizada
-      });
-    }
-    
-    // Crear un nuevo registro de asistencia
-    const nuevaAsistencia = new Asistencia({
-      estudiante,
-      materia,
-      fecha: fechaAsistencia,
-      presente: presente !== undefined ? presente : true
-    });
-    
-    const asistenciaGuardada = await nuevaAsistencia.save();
-    
-    const asistenciaCompleta = await Asistencia.findById(asistenciaGuardada._id)
-      .populate('estudiante', 'nombre codigo programaAcademico')
-      .populate('materia', 'nombre codigo');
-    
-    // Emitir evento para clientes conectados
-    global.io.emit('nueva-asistencia', asistenciaCompleta);
-    
-    res.status(201).json(asistenciaCompleta);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Registrar asistencia por huella
-router.post('/huella', async (req, res) => {
-  try {
-    const { huellaID, materia } = req.body;
-    
-    if (!huellaID) {
-      return res.status(400).json({ error: 'Se requiere el ID de huella' });
-    }
-    
-    if (!materia) {
-      return res.status(400).json({ error: 'Se requiere el ID de la materia' });
-    }
-    
-    // Buscar estudiante por ID de huella
-    const estudiante = await Estudiante.findOne({ huellaID });
-    
-    if (!estudiante) {
-      return res.status(404).json({ error: 'No se encontró ningún estudiante con esa huella' });
-    }
-    
-    // Verificar si la materia existe y está activa
-    const materiaExiste = await Materia.findOne({ _id: materia, estado: 'activo' });
-    if (!materiaExiste) {
-      return res.status(404).json({ error: 'Materia no encontrada o está en papelera' });
-    }
-    
-    // Verificar si el estudiante está inscrito en la materia
-    if (!estudiante.materias.includes(materia)) {
-      return res.status(400).json({
-        error: 'El estudiante no está inscrito en esta materia',
+      return res.status(400).json({ 
+        error: 'Ya se registró asistencia para este estudiante en esta materia hoy',
+        asistencia: asistenciaExistente,
         estudiante: {
           id: estudiante._id,
           nombre: estudiante.nombre,
@@ -279,82 +265,76 @@ router.post('/huella', async (req, res) => {
       });
     }
     
-    // Verificar si ya existe un registro para este estudiante, materia y fecha actual
-    const fechaActual = new Date();
-    const fechaInicio = new Date(fechaActual);
-    fechaInicio.setHours(0, 0, 0, 0);
-
-    const fechaFin = new Date(fechaActual.getTime() + 3 * 60 * 60 * 1000); // 3 horas después
-
-    const asistenciaExistente = await Asistencia.findOne({
-      estudiante: estudiante._id,
-      materia,
-      fecha: { $gte: fechaInicio, $lte: fechaFin }
-    });
-
-    if (asistenciaExistente) {
-      // NO crear nuevo registro, devolver el existente con mensaje informativo
-      const asistenciaCompleta = await Asistencia.findById(asistenciaExistente._id)
-        .populate('estudiante', 'nombre codigo programaAcademico')
-        .populate('materia', 'nombre codigo');
-      
-      return res.json({
-        mensaje: 'Asistencia ya registrada para este estudiante hoy',
-        asistencia: asistenciaCompleta
-      });
-    }
-
-    console.log('✅ Sistema de escaneo continuo implementado - 5 segundos con re-envío automático');
-    // Si no existe, crear un nuevo registro de asistencia    
-    // Crear un nuevo registro de asistencia
     const nuevaAsistencia = new Asistencia({
       estudiante: estudiante._id,
-      materia,
-      fecha: fechaActual,
-      presente: true
+      materia: materiaId,
+      presente,
+      registradoPor: req.user._id
     });
     
-    const asistenciaGuardada = await nuevaAsistencia.save();
+    const asistenciaSaved = await nuevaAsistencia.save();
     
-    const asistenciaCompleta = await Asistencia.findById(asistenciaGuardada._id)
-      .populate('estudiante', 'nombre codigo programaAcademico')
-      .populate('materia', 'nombre codigo');
-    
-    // Emitir evento para clientes conectados
-    global.io.emit('nueva-asistencia', asistenciaCompleta);
+    // Poblamos los datos para la respuesta
+    const asistenciaCompleta = await Asistencia.findById(asistenciaSaved._id)
+      .populate({
+        path: 'estudiante',
+        match: { creadoPor: req.user._id }
+      })
+      .populate({
+        path: 'materia',
+        match: { creadoPor: req.user._id }
+      })
+      .populate('registradoPor', 'nombre apellido username');
     
     res.status(201).json({
-      mensaje: 'Asistencia registrada correctamente',
-      asistencia: asistenciaCompleta
+      message: 'Asistencia registrada exitosamente',
+      asistencia: asistenciaCompleta,
+      estudiante: {
+        id: estudiante._id,
+        nombre: estudiante.nombre,
+        codigo: estudiante.codigo,
+        programaAcademico: estudiante.programaAcademico
+      }
     });
+    
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (error.code === 11000) {
+      res.status(400).json({ error: 'Ya existe un registro de asistencia para este estudiante en esta materia en esta fecha' });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
-// Actualizar registro de asistencia
+// Actualizar asistencia - MODIFICADO: Verificar propiedad
 router.put('/:id', async (req, res) => {
   try {
     const { presente, fecha } = req.body;
     
-    const actualizacion = {};
-    if (presente !== undefined) actualizacion.presente = presente;
-    if (fecha) actualizacion.fecha = new Date(fecha);
+    // Verificar que la asistencia pertenece al docente
+    const asistenciaExistente = await Asistencia.findOne({
+      _id: req.params.id,
+      registradoPor: req.user._id
+    });
+    
+    if (!asistenciaExistente) {
+      return res.status(404).json({ error: 'Asistencia no encontrada o no tiene permisos para modificarla' });
+    }
     
     const asistenciaActualizada = await Asistencia.findByIdAndUpdate(
       req.params.id,
-      actualizacion,
+      { presente, fecha },
       { new: true }
     )
-    .populate('estudiante', 'nombre codigo programaAcademico')
-    .populate('materia', 'nombre codigo');
-    
-    if (!asistenciaActualizada) {
-      return res.status(404).json({ error: 'Registro de asistencia no encontrado' });
-    }
-    
-    // Emitir evento para clientes conectados
-    global.io.emit('asistencia-actualizada', asistenciaActualizada);
+    .populate({
+      path: 'estudiante',
+      match: { creadoPor: req.user._id }
+    })
+    .populate({
+      path: 'materia',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('registradoPor', 'nombre apellido username');
     
     res.json(asistenciaActualizada);
   } catch (error) {
@@ -362,254 +342,109 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Eliminar registro de asistencia
+// Eliminar asistencia - MODIFICADO: Verificar propiedad
 router.delete('/:id', async (req, res) => {
   try {
-    const asistenciaEliminada = await Asistencia.findByIdAndDelete(req.params.id);
+    // Verificar que la asistencia pertenece al docente
+    const asistencia = await Asistencia.findOne({
+      _id: req.params.id,
+      registradoPor: req.user._id
+    });
     
-    if (!asistenciaEliminada) {
-      return res.status(404).json({ error: 'Registro de asistencia no encontrado' });
+    if (!asistencia) {
+      return res.status(404).json({ error: 'Asistencia no encontrada o no tiene permisos para eliminarla' });
     }
     
-    // Emitir evento para clientes conectados
-    global.io.emit('asistencia-eliminada', { id: req.params.id });
+    await Asistencia.findByIdAndDelete(req.params.id);
+    
+    res.json({ message: 'Asistencia eliminada correctamente' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Obtener estadísticas generales - MODIFICADO: Solo del docente actual
+router.get('/estadisticas/generales', async (req, res) => {
+  try {
+    const { materiaId, fechaInicio, fechaFin } = req.query;
+    
+    // Filtros base
+    let filtros = { 
+      registradoPor: req.user._id 
+    };
+    
+    if (materiaId) {
+      // Verificar que la materia pertenece al docente
+      const materia = await Materia.findOne({
+        _id: materiaId,
+        creadoPor: req.user._id
+      });
+      
+      if (!materia) {
+        return res.status(400).json({ error: 'Materia no encontrada o no le pertenece' });
+      }
+      
+      filtros.materia = materiaId;
+    }
+    
+    if (fechaInicio || fechaFin) {
+      filtros.fecha = {};
+      if (fechaInicio) filtros.fecha.$gte = new Date(fechaInicio);
+      if (fechaFin) filtros.fecha.$lte = new Date(fechaFin);
+    }
+    
+    // Obtener estadísticas
+    const totalRegistros = await Asistencia.countDocuments(filtros);
+    const totalPresentes = await Asistencia.countDocuments({ ...filtros, presente: true });
+    const totalAusentes = await Asistencia.countDocuments({ ...filtros, presente: false });
+    
+    // Obtener estudiantes únicos que tienen asistencia
+    const estudiantesConAsistencia = await Asistencia.distinct('estudiante', filtros);
+    
+    // Obtener materias únicas que tienen asistencia
+    const materiasConAsistencia = await Asistencia.distinct('materia', filtros);
+    
+    const porcentajeAsistencia = totalRegistros > 0 ? ((totalPresentes / totalRegistros) * 100).toFixed(2) : 0;
     
     res.json({
-      mensaje: 'Registro de asistencia eliminado correctamente',
-      id: asistenciaEliminada._id
+      totalRegistros,
+      totalPresentes,
+      totalAusentes,
+      porcentajeAsistencia: parseFloat(porcentajeAsistencia),
+      estudiantesUnicos: estudiantesConAsistencia.length,
+      materiasUnicas: materiasConAsistencia.length
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Registrar asistencia masiva para una materia
-router.post('/masiva', async (req, res) => {
+// Obtener asistencias por fecha - MODIFICADO: Solo del docente actual
+router.get('/fecha/:fecha', async (req, res) => {
   try {
-    const { materia, estudiantes, fecha, presente } = req.body;
+    const fecha = new Date(req.params.fecha);
+    const inicioDelDia = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+    const finDelDia = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 23, 59, 59, 999);
     
-    if (!materia) {
-      return res.status(400).json({ error: 'Se requiere el ID de la materia' });
-    }
-    
-    if (!Array.isArray(estudiantes) || estudiantes.length === 0) {
-      return res.status(400).json({ error: 'Se requiere un array de IDs de estudiantes' });
-    }
-    
-    // Verificar si la materia existe y está activa
-    const materiaExiste = await Materia.findOne({ _id: materia, estado: 'activo' });
-    if (!materiaExiste) {
-      return res.status(404).json({ error: 'Materia no encontrada o está en papelera' });
-    }
-    
-    // Si no se proporciona una fecha, usar la fecha actual
-    const fechaAsistencia = fecha ? new Date(fecha) : new Date();
-    
-    // Construir fechas de inicio y fin para el día
-    const fechaInicio = new Date(fechaAsistencia);
-    fechaInicio.setHours(0, 0, 0, 0);
-    
-    const fechaFin = new Date(fechaAsistencia);
-    fechaFin.setHours(23, 59, 59, 999);
-    
-    // Array para almacenar resultados
-    const resultados = [];
-    
-    // Procesar cada estudiante
-    for (const estudianteId of estudiantes) {
-      try {
-        // Verificar si el estudiante existe
-        const estudiante = await Estudiante.findById(estudianteId);
-        
-        if (!estudiante) {
-          resultados.push({
-            estudiante: estudianteId,
-            exito: false,
-            mensaje: 'Estudiante no encontrado'
-          });
-          continue;
-        }
-        
-        // Verificar si el estudiante está inscrito en la materia
-        if (!estudiante.materias.includes(materia)) {
-          resultados.push({
-            estudiante: estudianteId,
-            nombre: estudiante.nombre,
-            codigo: estudiante.codigo,
-            exito: false,
-            mensaje: 'El estudiante no está inscrito en esta materia'
-          });
-          continue;
-        }
-        
-        // Verificar si ya existe un registro de asistencia para este estudiante y materia en la fecha dada
-        const asistenciaExistente = await Asistencia.findOne({
-          estudiante: estudianteId,
-          materia,
-          fecha: { $gte: fechaInicio, $lte: fechaFin }
-        });
-        
-        if (asistenciaExistente) {
-          // Actualizar registro existente
-          asistenciaExistente.presente = presente !== undefined ? presente : true;
-          await asistenciaExistente.save();
-          
-          resultados.push({
-            estudiante: estudianteId,
-            nombre: estudiante.nombre,
-            codigo: estudiante.codigo,
-            asistencia: asistenciaExistente._id,
-            exito: true,
-            mensaje: 'Registro de asistencia actualizado'
-          });
-        } else {
-          // Crear nuevo registro
-          const nuevaAsistencia = new Asistencia({
-            estudiante: estudianteId,
-            materia,
-            fecha: fechaAsistencia,
-            presente: presente !== undefined ? presente : true
-          });
-          
-          const asistenciaGuardada = await nuevaAsistencia.save();
-          
-          resultados.push({
-            estudiante: estudianteId,
-            nombre: estudiante.nombre,
-            codigo: estudiante.codigo,
-            asistencia: asistenciaGuardada._id,
-            exito: true,
-            mensaje: 'Registro de asistencia creado'
-          });
-        }
-      } catch (error) {
-        resultados.push({
-          estudiante: estudianteId,
-          exito: false,
-          mensaje: `Error: ${error.message}`
-        });
-      }
-    }
-    
-    // Emitir evento para clientes conectados
-    global.io.emit('asistencia-masiva', {
-      materia,
-      fecha: fechaAsistencia,
-      resultados
-    });
-    
-    res.json({
-      mensaje: 'Proceso de asistencia masiva completado',
-      materia: {
-        id: materiaExiste._id,
-        nombre: materiaExiste.nombre,
-        codigo: materiaExiste.codigo
+    const asistencias = await Asistencia.find({
+      fecha: {
+        $gte: inicioDelDia,
+        $lte: finDelDia
       },
-      fecha: fechaAsistencia,
-      resultados
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Obtener estadísticas de asistencia por materia
-router.get('/estadisticas/materia/:id', async (req, res) => {
-  try {
-    const materiaId = req.params.id;
+      registradoPor: req.user._id
+    })
+    .populate({
+      path: 'estudiante',
+      match: { creadoPor: req.user._id }
+    })
+    .populate({
+      path: 'materia',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('registradoPor', 'nombre apellido username')
+    .sort({ fecha: -1 });
     
-    // Verificar si la materia existe
-    const materia = await Materia.findById(materiaId);
-    if (!materia) {
-      return res.status(404).json({ error: 'Materia no encontrada' });
-    }
-    
-    // Obtener todos los estudiantes inscritos en la materia
-    const estudiantes = await Estudiante.find({ materias: materiaId });
-    
-    // Obtener todas las asistencias de la materia
-    const asistencias = await Asistencia.find({ materia: materiaId });
-    
-    // Calcular estadísticas
-    const totalEstudiantes = estudiantes.length;
-    const totalAsistencias = asistencias.length;
-    
-    // Contar asistencias por fecha
-    const asistenciasPorFecha = {};
-    asistencias.forEach(asistencia => {
-      const fecha = asistencia.fecha.toISOString().split('T')[0];
-      
-      if (!asistenciasPorFecha[fecha]) {
-        asistenciasPorFecha[fecha] = {
-          fecha,
-          presentes: 0,
-          ausentes: 0,
-          total: 0
-        };
-      }
-      
-      asistenciasPorFecha[fecha].total++;
-      
-      if (asistencia.presente) {
-        asistenciasPorFecha[fecha].presentes++;
-      } else {
-        asistenciasPorFecha[fecha].ausentes++;
-      }
-    });
-    
-    // Contar asistencias por estudiante
-    const asistenciasPorEstudiante = {};
-    asistencias.forEach(asistencia => {
-      const estudianteId = asistencia.estudiante.toString();
-      
-      if (!asistenciasPorEstudiante[estudianteId]) {
-        asistenciasPorEstudiante[estudianteId] = {
-          estudiante: estudianteId,
-          presentes: 0,
-          ausentes: 0,
-          total: 0
-        };
-      }
-      
-      asistenciasPorEstudiante[estudianteId].total++;
-      
-      if (asistencia.presente) {
-        asistenciasPorEstudiante[estudianteId].presentes++;
-      } else {
-        asistenciasPorEstudiante[estudianteId].ausentes++;
-      }
-    });
-    
-    // Calcular porcentajes de asistencia
-    Object.values(asistenciasPorEstudiante).forEach(est => {
-      est.porcentajeAsistencia = est.total > 0 ? (est.presentes / est.total) * 100 : 0;
-    });
-    
-    // Obtener datos de estudiantes para enriquecer la respuesta
-    const estudiantesData = await Promise.all(
-      Object.keys(asistenciasPorEstudiante).map(async (id) => {
-        const est = await Estudiante.findById(id, 'nombre codigo programaAcademico');
-        return {
-          id,
-          nombre: est ? est.nombre : 'Desconocido',
-          codigo: est ? est.codigo : 'Desconocido',
-          programaAcademico: est ? est.programaAcademico : 'Desconocido',
-          ...asistenciasPorEstudiante[id]
-        };
-      })
-    );
-    
-    res.json({
-      materia: {
-        id: materia._id,
-        nombre: materia.nombre,
-        codigo: materia.codigo
-      },
-      totalEstudiantes,
-      totalAsistencias,
-      asistenciasPorFecha: Object.values(asistenciasPorFecha),
-      estudiantesData
-    });
+    res.json(asistencias);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

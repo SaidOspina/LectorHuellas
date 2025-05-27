@@ -2,37 +2,63 @@ const express = require('express');
 const router = express.Router();
 const { Estudiante, Materia, Asistencia } = require('../database');
 
-// Obtener todos los estudiantes
+// Obtener todos los estudiantes - MODIFICADO: Solo del docente actual
 router.get('/', async (req, res) => {
   try {
-    const estudiantes = await Estudiante.find().populate('materias');
+    const estudiantes = await Estudiante.find({ 
+      creadoPor: req.user._id 
+    })
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id } // Solo materias del mismo docente
+    })
+    .populate('creadoPor', 'nombre apellido username');
+    
     res.json(estudiantes);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener un estudiante por ID
+// Obtener un estudiante por ID - MODIFICADO: Verificar propiedad
 router.get('/:id', async (req, res) => {
   try {
-    const estudiante = await Estudiante.findById(req.params.id).populate('materias');
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    })
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
+    
     if (!estudiante) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para acceder' });
     }
+    
     res.json(estudiante);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener un estudiante por ID de huella
+// Obtener un estudiante por ID de huella - MODIFICADO: Verificar propiedad
 router.get('/huella/:huellaID', async (req, res) => {
   try {
     const huellaID = parseInt(req.params.huellaID);
-    const estudiante = await Estudiante.findOne({ huellaID }).populate('materias');
+    const estudiante = await Estudiante.findOne({ 
+      huellaID,
+      creadoPor: req.user._id
+    })
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     if (!estudiante) {
-      return res.status(404).json({ error: 'Estudiante no encontrado con esa huella' });
+      return res.status(404).json({ error: 'Estudiante no encontrado con esa huella o no tiene permisos para acceder' });
     }
     
     res.json(estudiante);
@@ -41,15 +67,19 @@ router.get('/huella/:huellaID', async (req, res) => {
   }
 });
 
-// Crear nuevo estudiante
+// Crear nuevo estudiante - MODIFICADO: Asignar docente creador
 router.post('/', async (req, res) => {
   try {
     const { nombre, codigo, programaAcademico, materias, huellaID } = req.body;
     
-    // Verificar si ya existe un estudiante con ese código
-    const estudianteExistente = await Estudiante.findOne({ codigo });
+    // Verificar si ya existe un estudiante con ese código para este docente
+    const estudianteExistente = await Estudiante.findOne({ 
+      codigo,
+      creadoPor: req.user._id
+    });
+    
     if (estudianteExistente) {
-      return res.status(400).json({ error: 'Ya existe un estudiante con ese código' });
+      return res.status(400).json({ error: 'Ya tiene un estudiante con ese código' });
     }
     
     // Verificar si ya existe un estudiante con esa huella
@@ -60,15 +90,16 @@ router.post('/', async (req, res) => {
       }
     }
     
-    // Verificar si las materias existen
+    // Verificar si las materias existen y pertenecen al docente
     if (materias && materias.length > 0) {
       const materiasValidas = await Materia.find({ 
         _id: { $in: materias },
-        estado: 'activo'
+        estado: 'activo',
+        creadoPor: req.user._id
       });
       
       if (materiasValidas.length !== materias.length) {
-        return res.status(400).json({ error: 'Una o más materias no existen o están en papelera' });
+        return res.status(400).json({ error: 'Una o más materias no existen, están en papelera, o no le pertenecen' });
       }
     }
     
@@ -77,13 +108,19 @@ router.post('/', async (req, res) => {
       codigo,
       programaAcademico,
       materias: materias || [],
-      huellaID: huellaID || null
+      huellaID: huellaID || null,
+      creadoPor: req.user._id
     });
     
     const estudianteSaved = await nuevoEstudiante.save();
     
     // Poblamos las materias para devolver el objeto completo
-    const estudianteConMaterias = await Estudiante.findById(estudianteSaved._id).populate('materias');
+    const estudianteConMaterias = await Estudiante.findById(estudianteSaved._id)
+      .populate({
+        path: 'materias',
+        match: { creadoPor: req.user._id }
+      })
+      .populate('creadoPor', 'nombre apellido username');
     
     res.status(201).json(estudianteConMaterias);
   } catch (error) {
@@ -91,20 +128,31 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Actualizar estudiante
+// Actualizar estudiante - MODIFICADO: Verificar propiedad
 router.put('/:id', async (req, res) => {
   try {
     const { nombre, codigo, programaAcademico, materias, huellaID } = req.body;
     
-    // Si se cambia el código, verificar que no exista otro con ese código
-    if (codigo) {
-      const estudianteExistente = await Estudiante.findOne({ 
-        codigo, 
+    // Verificar que el estudiante existe y pertenece al docente
+    const estudianteExistente = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
+    if (!estudianteExistente) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para modificarlo' });
+    }
+    
+    // Si se cambia el código, verificar que no exista otro con ese código para este docente
+    if (codigo && codigo !== estudianteExistente.codigo) {
+      const codigoExistente = await Estudiante.findOne({ 
+        codigo,
+        creadoPor: req.user._id,
         _id: { $ne: req.params.id } 
       });
       
-      if (estudianteExistente) {
-        return res.status(400).json({ error: 'Ya existe otro estudiante con ese código' });
+      if (codigoExistente) {
+        return res.status(400).json({ error: 'Ya tiene otro estudiante con ese código' });
       }
     }
     
@@ -120,15 +168,16 @@ router.put('/:id', async (req, res) => {
       }
     }
     
-    // Verificar si las materias existen
+    // Verificar si las materias existen y pertenecen al docente
     if (materias && materias.length > 0) {
       const materiasValidas = await Materia.find({ 
         _id: { $in: materias },
-        estado: 'activo'
+        estado: 'activo',
+        creadoPor: req.user._id
       });
       
       if (materiasValidas.length !== materias.length) {
-        return res.status(400).json({ error: 'Una o más materias no existen o están en papelera' });
+        return res.status(400).json({ error: 'Una o más materias no existen, están en papelera, o no le pertenecen' });
       }
     }
     
@@ -136,11 +185,12 @@ router.put('/:id', async (req, res) => {
       req.params.id,
       { nombre, codigo, programaAcademico, materias, huellaID },
       { new: true }
-    ).populate('materias');
-    
-    if (!estudianteActualizado) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
-    }
+    )
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     res.json(estudianteActualizado);
   } catch (error) {
@@ -148,13 +198,23 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Registrar huella dactilar para estudiante
+// Registrar huella dactilar para estudiante - MODIFICADO: Verificar propiedad
 router.post('/:id/huella', async (req, res) => {
   try {
     const { huellaID } = req.body;
     
     if (!huellaID) {
       return res.status(400).json({ error: 'Se requiere el ID de huella' });
+    }
+    
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para modificarlo' });
     }
     
     // Verificar si ya existe un estudiante con esa huella
@@ -178,11 +238,12 @@ router.post('/:id/huella', async (req, res) => {
       req.params.id,
       { huellaID },
       { new: true }
-    ).populate('materias');
-    
-    if (!estudianteActualizado) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
-    }
+    )
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     res.json(estudianteActualizado);
   } catch (error) {
@@ -190,18 +251,29 @@ router.post('/:id/huella', async (req, res) => {
   }
 });
 
-// Eliminar huella dactilar de estudiante
+// Eliminar huella dactilar de estudiante - MODIFICADO: Verificar propiedad
 router.delete('/:id/huella', async (req, res) => {
   try {
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
+    
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para modificarlo' });
+    }
+    
     const estudianteActualizado = await Estudiante.findByIdAndUpdate(
       req.params.id,
       { $unset: { huellaID: "" } },
       { new: true }
-    ).populate('materias');
-    
-    if (!estudianteActualizado) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
-    }
+    )
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     res.json(estudianteActualizado);
   } catch (error) {
@@ -209,24 +281,28 @@ router.delete('/:id/huella', async (req, res) => {
   }
 });
 
-// Inscribir estudiante a una materia
+// Inscribir estudiante a una materia - MODIFICADO: Verificar propiedad
 router.post('/:id/materias/:materiaId', async (req, res) => {
   try {
-    // Verificar si la materia existe y está activa
+    // Verificar si la materia existe, está activa y pertenece al docente
     const materia = await Materia.findOne({ 
       _id: req.params.materiaId,
-      estado: 'activo'
+      estado: 'activo',
+      creadoPor: req.user._id
     });
     
     if (!materia) {
-      return res.status(404).json({ error: 'Materia no encontrada o está en papelera' });
+      return res.status(404).json({ error: 'Materia no encontrada, está en papelera, o no le pertenece' });
     }
     
-    // Actualizar estudiante agregando la materia
-    const estudiante = await Estudiante.findById(req.params.id);
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
     
     if (!estudiante) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para modificarlo' });
     }
     
     // Verificar si el estudiante ya está inscrito en la materia
@@ -234,12 +310,16 @@ router.post('/:id/materias/:materiaId', async (req, res) => {
       return res.status(400).json({ error: 'El estudiante ya está inscrito en esta materia' });
     }
     
-    // Agregar materia al estudiante
-    estudiante.materias.push(req.params.materiaId);
-    await estudiante.save();
-    
-    // Devolver estudiante actualizado con materias pobladas
-    const estudianteActualizado = await Estudiante.findById(req.params.id).populate('materias');
+    const estudianteActualizado = await Estudiante.findByIdAndUpdate(
+      req.params.id,
+      { $push: { materias: req.params.materiaId } },
+      { new: true }
+    )
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     res.json(estudianteActualizado);
   } catch (error) {
@@ -247,42 +327,39 @@ router.post('/:id/materias/:materiaId', async (req, res) => {
   }
 });
 
-// Desinscribir estudiante de una materia
+// Desinscribir estudiante de una materia - MODIFICADO: Verificar propiedad
 router.delete('/:id/materias/:materiaId', async (req, res) => {
   try {
-    const estudiante = await Estudiante.findById(req.params.id);
-    
-    if (!estudiante) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
-    }
-    
-    // Verificar si el estudiante está inscrito en la materia
-    if (!estudiante.materias.includes(req.params.materiaId)) {
-      return res.status(400).json({ error: 'El estudiante no está inscrito en esta materia' });
-    }
-    
-    // Verificar si hay asistencias para este estudiante en esta materia
-    const asistencias = await Asistencia.find({
-      estudiante: req.params.id,
-      materia: req.params.materiaId
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
     });
     
-    if (asistencias.length > 0) {
-      return res.status(400).json({ 
-        error: 'No se puede desinscribir porque el estudiante tiene registros de asistencia en esta materia',
-        asistencias: asistencias.length
-      });
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para modificarlo' });
     }
     
-    // Quitar materia del estudiante
-    estudiante.materias = estudiante.materias.filter(
-      m => m.toString() !== req.params.materiaId
-    );
+    // Verificar que la materia pertenece al docente
+    const materia = await Materia.findOne({
+      _id: req.params.materiaId,
+      creadoPor: req.user._id
+    });
     
-    await estudiante.save();
+    if (!materia) {
+      return res.status(404).json({ error: 'Materia no encontrada o no le pertenece' });
+    }
     
-    // Devolver estudiante actualizado con materias pobladas
-    const estudianteActualizado = await Estudiante.findById(req.params.id).populate('materias');
+    const estudianteActualizado = await Estudiante.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { materias: req.params.materiaId } },
+      { new: true }
+    )
+    .populate({
+      path: 'materias',
+      match: { creadoPor: req.user._id }
+    })
+    .populate('creadoPor', 'nombre apellido username');
     
     res.json(estudianteActualizado);
   } catch (error) {
@@ -290,100 +367,89 @@ router.delete('/:id/materias/:materiaId', async (req, res) => {
   }
 });
 
-// Eliminar estudiante (con confirmación doble)
+// Eliminar estudiante - MODIFICADO: Verificar propiedad
 router.delete('/:id', async (req, res) => {
   try {
-    const { confirmar } = req.query;
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
     
-    if (confirmar !== 'true') {
-      return res.status(400).json({ 
-        error: 'Se requiere confirmación para eliminar el estudiante',
-        mensaje: 'Agregue ?confirmar=true a la URL para confirmar la eliminación'
-      });
+    if (!estudiante) {
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para eliminarlo' });
     }
     
-    // Verificar si hay asistencias para este estudiante
-    const asistencias = await Asistencia.find({ estudiante: req.params.id });
+    // Verificar si hay asistencias asociadas
+    const asistencias = await Asistencia.find({ 
+      estudiante: req.params.id,
+      registradoPor: req.user._id
+    });
     
     if (asistencias.length > 0) {
       return res.status(400).json({ 
-        error: 'No se puede eliminar el estudiante porque tiene registros de asistencia',
-        asistencias: asistencias.length
+        error: 'No se puede eliminar el estudiante porque tiene registros de asistencia asociados'
       });
     }
     
-    const estudianteEliminado = await Estudiante.findByIdAndDelete(req.params.id);
+    await Estudiante.findByIdAndDelete(req.params.id);
     
-    if (!estudianteEliminado) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
-    }
-    
-    res.json({ 
-      mensaje: 'Estudiante eliminado correctamente',
-      estudiante: {
-        id: estudianteEliminado._id,
-        nombre: estudianteEliminado.nombre,
-        codigo: estudianteEliminado.codigo
-      }
-    });
+    res.json({ message: 'Estudiante eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Obtener reporte de asistencia de un estudiante
-router.get('/:id/asistencia', async (req, res) => {
+// Obtener asistencias de un estudiante - MODIFICADO: Verificar propiedad
+router.get('/:id/asistencias', async (req, res) => {
   try {
-    const estudiante = await Estudiante.findById(req.params.id);
+    // Verificar que el estudiante pertenece al docente
+    const estudiante = await Estudiante.findOne({
+      _id: req.params.id,
+      creadoPor: req.user._id
+    });
     
     if (!estudiante) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
+      return res.status(404).json({ error: 'Estudiante no encontrado o no tiene permisos para acceder' });
     }
     
-    // Opcionalmente filtrar por materia
-    const filtroMateria = req.query.materia ? { materia: req.query.materia } : {};
+    const { materiaId, fechaInicio, fechaFin } = req.query;
     
-    // Obtener asistencias del estudiante
-    const asistencias = await Asistencia.find({
+    // Construir filtros
+    let filtros = { 
       estudiante: req.params.id,
-      ...filtroMateria
-    })
-    .populate('materia')
-    .sort({ fecha: -1 });
+      registradoPor: req.user._id
+    };
     
-    // Agrupar asistencias por materia
-    const asistenciasPorMateria = {};
-    
-    for (const asistencia of asistencias) {
-      const materiaId = asistencia.materia._id.toString();
+    if (materiaId) {
+      // Verificar que la materia pertenece al docente
+      const materia = await Materia.findOne({
+        _id: materiaId,
+        creadoPor: req.user._id
+      });
       
-      if (!asistenciasPorMateria[materiaId]) {
-        asistenciasPorMateria[materiaId] = {
-          materia: {
-            id: asistencia.materia._id,
-            nombre: asistencia.materia.nombre,
-            codigo: asistencia.materia.codigo
-          },
-          asistencias: []
-        };
+      if (!materia) {
+        return res.status(400).json({ error: 'Materia no encontrada o no le pertenece' });
       }
       
-      asistenciasPorMateria[materiaId].asistencias.push({
-        id: asistencia._id,
-        fecha: asistencia.fecha,
-        presente: asistencia.presente
-      });
+      filtros.materia = materiaId;
     }
     
-    res.json({
-      estudiante: {
-        id: estudiante._id,
-        nombre: estudiante.nombre,
-        codigo: estudiante.codigo,
-        programaAcademico: estudiante.programaAcademico
-      },
-      materias: Object.values(asistenciasPorMateria)
-    });
+    if (fechaInicio || fechaFin) {
+      filtros.fecha = {};
+      if (fechaInicio) filtros.fecha.$gte = new Date(fechaInicio);
+      if (fechaFin) filtros.fecha.$lte = new Date(fechaFin);
+    }
+    
+    const asistencias = await Asistencia.find(filtros)
+      .populate({
+        path: 'materia',
+        match: { creadoPor: req.user._id }
+      })
+      .populate('registradoPor', 'nombre apellido username')
+      .sort({ fecha: -1 });
+    
+    res.json(asistencias);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
