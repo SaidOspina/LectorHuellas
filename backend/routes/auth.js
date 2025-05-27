@@ -183,6 +183,123 @@ router.put('/cambiar-password', auth, async (req, res) => {
   }
 });
 
+// Ruta para actualizar perfil de usuario
+router.put('/actualizar-perfil', auth, async (req, res) => {
+  try {
+    const { nombre, apellido, email, username } = req.body;
+
+    // Validar datos de entrada
+    if (!nombre || !apellido || !email || !username) {
+      return res.status(400).json({ 
+        error: 'Todos los campos son requeridos',
+        code: 'MISSING_REQUIRED_FIELDS'
+      });
+    }
+
+    // Validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ 
+        error: 'Formato de email inválido',
+        code: 'INVALID_EMAIL_FORMAT'
+      });
+    }
+
+    // Validar longitud de username
+    if (username.length < 3 || username.length > 50) {
+      return res.status(400).json({ 
+        error: 'El nombre de usuario debe tener entre 3 y 50 caracteres',
+        code: 'INVALID_USERNAME_LENGTH'
+      });
+    }
+
+    // Verificar que no exista otro usuario con el mismo email o username
+    // (excluyendo al usuario actual)
+    const usuarioExistente = await Usuario.findOne({
+      _id: { $ne: req.user._id },
+      $or: [
+        { username: username.toLowerCase() },
+        { email: email.toLowerCase() }
+      ]
+    });
+
+    if (usuarioExistente) {
+      let errorMessage = 'Ya existe otro usuario con ';
+      if (usuarioExistente.username === username.toLowerCase()) {
+        errorMessage += 'ese nombre de usuario';
+      } else {
+        errorMessage += 'ese email';
+      }
+      
+      return res.status(400).json({ 
+        error: errorMessage,
+        code: 'USER_EXISTS'
+      });
+    }
+
+    // Buscar el usuario actual
+    const usuario = await Usuario.findById(req.user._id);
+    
+    if (!usuario) {
+      return res.status(404).json({ 
+        error: 'Usuario no encontrado',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    // Actualizar campos del usuario
+    usuario.nombre = nombre.trim();
+    usuario.apellido = apellido.trim();
+    usuario.email = email.toLowerCase().trim();
+    usuario.username = username.toLowerCase().trim();
+
+    // Guardar cambios
+    await usuario.save();
+
+    // Respuesta exitosa (sin incluir password)
+    const usuarioActualizado = usuario.toJSON();
+    
+    res.json({
+      success: true,
+      message: 'Perfil actualizado correctamente',
+      usuario: usuarioActualizado
+    });
+
+  } catch (error) {
+    console.error('Error al actualizar perfil:', error);
+    
+    // Manejar errores de validación de MongoDB
+    if (error.code === 11000) {
+      // Error de clave duplicada
+      let field = 'campo';
+      if (error.keyPattern && error.keyPattern.username) {
+        field = 'nombre de usuario';
+      } else if (error.keyPattern && error.keyPattern.email) {
+        field = 'email';
+      }
+      
+      return res.status(400).json({ 
+        error: `Ya existe otro usuario con ese ${field}`,
+        code: 'DUPLICATE_KEY'
+      });
+    }
+    
+    if (error.name === 'ValidationError') {
+      // Error de validación de Mongoose
+      const errorMessages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        error: errorMessages.join(', '),
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Error interno del servidor',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
+
 // Ruta para crear usuario (solo admin)
 router.post('/crear-usuario', auth, requireAdmin, async (req, res) => {
   try {
