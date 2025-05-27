@@ -49,19 +49,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Cargar materias desde la API
-// Cargar materias desde la API
+// Cargar materias desde la API con autenticación
 function loadMaterias() {
-    // Verificar si window.appUtils está definido
-    if (!window.appUtils || !window.appUtils.API_URL) {
-        console.error('Error: window.appUtils no está definido o API_URL no está disponible');
+    // Verificar que window.appUtils esté definido
+    if (!window.appUtils || !window.appUtils.fetchWithAuth) {
+        console.error('Error: window.appUtils no está definido o fetchWithAuth no está disponible');
         setTimeout(loadMaterias, 500); // Intentar de nuevo después de 500ms
         return;
     }
     
-    fetch(`${window.appUtils.API_URL}/materias`)
-        .then(response => response.json())
+    window.appUtils.fetchWithAuth('/materias')
+        .then(response => {
+            if (!response) return; // fetchWithAuth maneja los errores de auth
+            return response.json();
+        })
         .then(data => {
+            if (!data) return;
+            
             // Guardar materias en el estado global
             window.appUtils.appState.materias = data;
             
@@ -79,11 +83,15 @@ function loadMaterias() {
         });
 }
 
-// Cargar materias en papelera
+// Cargar materias en papelera con autenticación
 function loadPapelera() {
-    fetch(`${window.appUtils.API_URL}/materias?estado=papelera`)
-        .then(response => response.json())
+    window.appUtils.fetchWithAuth('/materias?estado=papelera')
+        .then(response => {
+            if (!response) return;
+            return response.json();
+        })
         .then(data => {
+            if (!data) return;
             // Mostrar materias en la tabla de papelera
             renderMateriasPapelera(data);
         })
@@ -117,9 +125,14 @@ function renderMaterias(materias) {
         row.dataset.id = materia._id;
         
         // Contar estudiantes inscritos
-        fetch(`${window.appUtils.API_URL}/materias/${materia._id}/estudiantes`)
-            .then(response => response.json())
+        window.appUtils.fetchWithAuth(`/materias/${materia._id}/estudiantes`)
+            .then(response => {
+                if (!response) return;
+                return response.json();
+            })
             .then(estudiantes => {
+                if (!estudiantes) return;
+                
                 const estudiantesCount = estudiantes.length;
                 
                 // Actualizar fila con la información
@@ -287,7 +300,7 @@ function showNuevaMateriaModal() {
     materiasElements.modalMateria.show();
 }
 
-// Guardar materia (crear o actualizar)
+// Guardar materia (crear o actualizar) con autenticación
 function saveMateria() {
     // Validar formulario
     if (!materiasElements.formMateria.checkValidity()) {
@@ -307,20 +320,19 @@ function saveMateria() {
     
     // Configurar solicitud
     const url = isEditing 
-        ? `${window.appUtils.API_URL}/materias/${materiaId}` 
-        : `${window.appUtils.API_URL}/materias`;
+        ? `/materias/${materiaId}` 
+        : '/materias';
     
     const method = isEditing ? 'PUT' : 'POST';
     
-    // Enviar solicitud a la API
-    fetch(url, {
+    // Enviar solicitud a la API con autenticación
+    window.appUtils.fetchWithAuth(url, {
         method,
-        headers: {
-            'Content-Type': 'application/json'
-        },
         body: JSON.stringify(materiaData)
     })
     .then(response => {
+        if (!response) return;
+        
         if (!response.ok) {
             return response.json().then(err => {
                 throw new Error(err.error || 'Error al guardar materia');
@@ -329,6 +341,8 @@ function saveMateria() {
         return response.json();
     })
     .then(data => {
+        if (!data) return;
+        
         // Cerrar modal
         materiasElements.modalMateria.hide();
         
@@ -362,16 +376,18 @@ function editarMateria(materia) {
     materiasElements.modalMateria.show();
 }
 
-// Mover materia a papelera
+// Mover materia a papelera con autenticación
 function moverAPapelera(materia) {
     window.appUtils.confirmAction(
         'Mover a papelera',
         `¿Está seguro de mover la materia "${materia.nombre}" a la papelera?`,
         () => {
-            fetch(`${window.appUtils.API_URL}/materias/${materia._id}/papelera`, {
+            window.appUtils.fetchWithAuth(`/materias/${materia._id}/papelera`, {
                 method: 'PATCH'
             })
             .then(response => {
+                if (!response) return;
+                
                 if (!response.ok) {
                     return response.json().then(err => {
                         throw new Error(err.error || 'Error al mover materia a papelera');
@@ -380,6 +396,8 @@ function moverAPapelera(materia) {
                 return response.json();
             })
             .then(data => {
+                if (!data) return;
+                
                 window.appUtils.showAlert(`Materia "${materia.nombre}" movida a papelera`, 'success');
                 loadMaterias();
             })
@@ -393,12 +411,14 @@ function moverAPapelera(materia) {
     );
 }
 
-// Restaurar materia desde papelera
+// Restaurar materia desde papelera con autenticación
 function restaurarMateria(materia) {
-    fetch(`${window.appUtils.API_URL}/materias/${materia._id}/restaurar`, {
+    window.appUtils.fetchWithAuth(`/materias/${materia._id}/restaurar`, {
         method: 'PATCH'
     })
     .then(response => {
+        if (!response) return;
+        
         if (!response.ok) {
             return response.json().then(err => {
                 throw new Error(err.error || 'Error al restaurar materia');
@@ -407,6 +427,8 @@ function restaurarMateria(materia) {
         return response.json();
     })
     .then(data => {
+        if (!data) return;
+        
         window.appUtils.showAlert(`Materia "${materia.nombre}" restaurada correctamente`, 'success');
         loadPapelera();
     })
@@ -416,16 +438,18 @@ function restaurarMateria(materia) {
     });
 }
 
-// Eliminar materia permanentemente
+// Eliminar materia permanentemente con autenticación
 function eliminarMateriaPermanente(materia) {
     window.appUtils.confirmAction(
         'Eliminar permanentemente',
         `¿Está seguro de eliminar permanentemente la materia "${materia.nombre}"? Esta acción no se puede deshacer.`,
         () => {
-            fetch(`${window.appUtils.API_URL}/materias/${materia._id}`, {
+            window.appUtils.fetchWithAuth(`/materias/${materia._id}`, {
                 method: 'DELETE'
             })
             .then(response => {
+                if (!response) return;
+                
                 if (!response.ok) {
                     return response.json().then(err => {
                         throw new Error(err.error || 'Error al eliminar materia');
@@ -434,6 +458,8 @@ function eliminarMateriaPermanente(materia) {
                 return response.json();
             })
             .then(data => {
+                if (!data) return;
+                
                 window.appUtils.showAlert(`Materia "${materia.nombre}" eliminada permanentemente`, 'success');
                 loadPapelera();
             })
@@ -483,97 +509,37 @@ function abrirTomarAsistencia(materia) {
 function updateMateriasSelectors() {
     const materias = window.appUtils.appState.materias;
     
-    // Actualizar selector en modal de estudiante
-    const selectEstudianteMaterias = document.getElementById('estudiante-materias');
-    if (selectEstudianteMaterias) {
-        const currentSelections = Array.from(selectEstudianteMaterias.selectedOptions).map(opt => opt.value);
-        
-        selectEstudianteMaterias.innerHTML = '';
-        
-        materias.forEach(materia => {
-            const option = document.createElement('option');
-            option.value = materia._id;
-            option.textContent = `${materia.nombre} (${materia.codigo})`;
-            option.selected = currentSelections.includes(materia._id);
-            selectEstudianteMaterias.appendChild(option);
-        });
-    }
+    // Lista de selectores a actualizar
+    const selectorsToUpdate = [
+        'estudiante-materias',
+        'asistencia-materia',
+        'asistencia-modal-materia',
+        'reporte-materia',
+        'asistencia-masiva-materia'
+    ];
     
-    // Actualizar selector en sección de asistencia
-    const selectAsistenciaMateria = document.getElementById('asistencia-materia');
-    if (selectAsistenciaMateria) {
-        const currentValue = selectAsistenciaMateria.value;
-        
-        // Mantener solo la primera opción (placeholder)
-        const placeholder = selectAsistenciaMateria.options[0];
-        selectAsistenciaMateria.innerHTML = '';
-        selectAsistenciaMateria.appendChild(placeholder);
-        
-        materias.forEach(materia => {
-            const option = document.createElement('option');
-            option.value = materia._id;
-            option.textContent = `${materia.nombre} (${materia.codigo})`;
-            option.selected = materia._id === currentValue;
-            selectAsistenciaMateria.appendChild(option);
-        });
-    }
-    
-    // Actualizar selector en modal de asistencia
-    const selectAsistenciaModalMateria = document.getElementById('asistencia-modal-materia');
-    if (selectAsistenciaModalMateria) {
-        const currentValue = selectAsistenciaModalMateria.value;
-        
-        // Mantener solo la primera opción (placeholder)
-        const placeholder = selectAsistenciaModalMateria.options[0];
-        selectAsistenciaModalMateria.innerHTML = '';
-        selectAsistenciaModalMateria.appendChild(placeholder);
-        
-        materias.forEach(materia => {
-            const option = document.createElement('option');
-            option.value = materia._id;
-            option.textContent = `${materia.nombre} (${materia.codigo})`;
-            option.selected = materia._id === currentValue;
-            selectAsistenciaModalMateria.appendChild(option);
-        });
-    }
-    
-    // Actualizar selector en sección de reportes
-    const selectReporteMateria = document.getElementById('reporte-materia');
-    if (selectReporteMateria) {
-        const currentValue = selectReporteMateria.value;
-        
-        // Mantener solo la primera opción (placeholder)
-        const placeholder = selectReporteMateria.options[0];
-        selectReporteMateria.innerHTML = '';
-        selectReporteMateria.appendChild(placeholder);
-        
-        materias.forEach(materia => {
-            const option = document.createElement('option');
-            option.value = materia._id;
-            option.textContent = `${materia.nombre} (${materia.codigo})`;
-            option.selected = materia._id === currentValue;
-            selectReporteMateria.appendChild(option);
-        });
-    }
-    
-    // Actualizar selector en modal de asistencia masiva
-    const selectAsistenciaMasivaMateria = document.getElementById('asistencia-masiva-materia');
-    if (selectAsistenciaMasivaMateria) {
-        const currentValue = selectAsistenciaMasivaMateria.value;
-        
-        // Mantener solo la primera opción (placeholder)
-        const placeholder = selectAsistenciaMasivaMateria.options[0];
-        selectAsistenciaMasivaMateria.innerHTML = '';
-        selectAsistenciaMasivaMateria.appendChild(placeholder);
-        
-        materias.forEach(materia => {
-            const option = document.createElement('option');
-            option.value = materia._id;
-            option.textContent = `${materia.nombre} (${materia.codigo})`;
-            option.selected = materia._id === currentValue;
-            selectAsistenciaMasivaMateria.appendChild(option);
-        });
-    }
+    selectorsToUpdate.forEach(selectorId => {
+        const selectElement = document.getElementById(selectorId);
+        if (selectElement) {
+            const currentValue = selectElement.value;
+            
+            // Mantener solo la primera opción (placeholder) si existe
+            const placeholder = selectElement.options[0];
+            selectElement.innerHTML = '';
+            if (placeholder && placeholder.value === '') {
+                selectElement.appendChild(placeholder);
+            }
+            
+            // Agregar materias
+            materias.forEach(materia => {
+                const option = document.createElement('option');
+                option.value = materia._id;
+                option.textContent = `${materia.nombre} (${materia.codigo})`;
+                option.selected = materia._id === currentValue;
+                selectElement.appendChild(option);
+            });
+        }
+    });
 }
 
 // Exponer funciones necesarias globalmente

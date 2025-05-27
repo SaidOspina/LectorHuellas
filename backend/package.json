@@ -1,7 +1,7 @@
 {
   "name": "control-asistencia-backend",
   "version": "1.0.0",
-  "description": "Sistema de control de asistencia con lector de huellas dactilares",
+  "description": "Sistema de control de asistencia con lector de huellas dactilares y autenticación",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,15 +13,20 @@
     "huella",
     "arduino",
     "mongodb",
-    "express"
+    "express",
+    "authentication",
+    "jwt"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@serialport/parser-readline": "^13.0.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
     "mongoose": "^7.8.7",
     "serialport": "^13.0.0",
     "socket.io": "^4.8.1"

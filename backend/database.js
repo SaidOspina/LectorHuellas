@@ -17,7 +17,10 @@ mongoose.connect(MONGODB_URI, {
   process.exit(1);
 });
 
-// Definir modelos de datos
+// Importar modelo de Usuario
+const Usuario = require('./models/usuario');
+
+// Definir modelos de datos existentes
 
 // Modelo para las materias
 const MateriaSchema = new mongoose.Schema({
@@ -25,7 +28,11 @@ const MateriaSchema = new mongoose.Schema({
   codigo: { type: String, required: true, unique: true },
   descripcion: { type: String },
   estado: { type: String, enum: ['activo', 'papelera'], default: 'activo' },
-  fechaCreacion: { type: Date, default: Date.now }
+  fechaCreacion: { type: Date, default: Date.now },
+  creadoPor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Usuario'
+  }
 });
 
 // Modelo para los estudiantes
@@ -33,8 +40,13 @@ const EstudianteSchema = new mongoose.Schema({
   nombre: { type: String, required: true },
   codigo: { type: String, required: true, unique: true },
   programaAcademico: { type: String, required: true },
-  huellaID: { type: Number, unique: true },
-  materias: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Materia' }]
+  huellaID: { type: Number, unique: true, sparse: true },
+  materias: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Materia' }],
+  fechaCreacion: { type: Date, default: Date.now },
+  creadoPor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Usuario'
+  }
 });
 
 // Modelo para las asistencias
@@ -42,11 +54,18 @@ const AsistenciaSchema = new mongoose.Schema({
   estudiante: { type: mongoose.Schema.Types.ObjectId, ref: 'Estudiante', required: true },
   materia: { type: mongoose.Schema.Types.ObjectId, ref: 'Materia', required: true },
   fecha: { type: Date, default: Date.now },
-  presente: { type: Boolean, default: true }
+  presente: { type: Boolean, default: true },
+  registradoPor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Usuario'
+  }
 });
 
 // Crear índices compuestos para evitar registros duplicados de asistencia
 AsistenciaSchema.index({ estudiante: 1, materia: 1, fecha: 1 }, { unique: true });
+
+// Crear índice para huellaID en estudiantes (sparse para permitir nulls)
+EstudianteSchema.index({ huellaID: 1 }, { sparse: true });
 
 // Exportar modelos
 const Materia = mongoose.model('Materia', MateriaSchema);
@@ -54,6 +73,7 @@ const Estudiante = mongoose.model('Estudiante', EstudianteSchema);
 const Asistencia = mongoose.model('Asistencia', AsistenciaSchema);
 
 module.exports = {
+  Usuario,
   Materia,
   Estudiante,
   Asistencia

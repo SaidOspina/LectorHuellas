@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - Control de Asistencia</title>
+    <link rel="shortcut icon" href="img/logo.ico" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .admin-header {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 1rem 0;
+            margin-bottom: 2rem;
+        }
+        
+        .stats-card {
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            margin-bottom: 1.5rem;
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stats-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            margin-right: 0.75rem;
+        }
+        
+        .user-avatar.admin {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+        }
+        
+        .user-avatar.docente {
+            background: linear-gradient(135deg, #0d6efd, #0056b3);
+        }
+        
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
+        .table-actions .btn {
+            margin-right: 0.25rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
+        .search-box {
+            border-radius: 25px;
+            border: 2px solid #e9ecef;
+            padding: 0.5rem 1rem;
+        }
+        
+        .search-box:focus {
+            border-color: #dc3545;
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header de Admin -->
+    <div class="admin-header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col">
+                    <h1 class="h3 mb-0">
+                        <i class="bi bi-shield-check me-2"></i>
+                        Panel de Administración
+                    </h1>
+                    <p class="mb-0 opacity-75">Gestión de usuarios del sistema</p>
+                </div>
+                <div class="col-auto">
+                    <div class="dropdown">
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle me-2"></i>
+                            <span id="current-user-name">Cargando...</span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#" id="btn-change-password">
+                                <i class="bi bi-key me-2"></i>Cambiar Contraseña
+                            </a></li>
+                            <li><a class="dropdown-item" href="/" id="btn-go-to-app">
+                                <i class="bi bi-app me-2"></i>Ir a la Aplicación
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" id="btn-logout">
+                                <i class="bi bi-box-arrow-right me-2"></i>Cerrar Sesión
+                            </a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="container">
+        <!-- Alertas -->
+        <div id="alerts-container"></div>
+
+        <!-- Estadísticas -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stats-card text-center">
+                    <div class="card-body">
+                        <i class="bi bi-people stats-icon text-primary"></i>
+                        <h3 class="mb-1" id="stat-total-users">0</h3>
+                        <p class="text-muted mb-0">Total Usuarios</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center">
+                    <div class="card-body">
+                        <i class="bi bi-check-circle stats-icon text-success"></i>
+                        <h3 class="mb-1" id="stat-active-users">0</h3>
+                        <p class="text-muted mb-0">Usuarios Activos</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center">
+                    <div class="card-body">
+                        <i class="bi bi-shield-check stats-icon text-danger"></i>
+                        <h3 class="mb-1" id="stat-admins">0</h3>
+                        <p class="text-muted mb-0">Administradores</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card text-center">
+                    <div class="card-body">
+                        <i class="bi bi-person-badge stats-icon text-info"></i>
+                        <h3 class="mb-1" id="stat-teachers">0</h3>
+                        <p class="text-muted mb-0">Docentes</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gestión de Usuarios -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-people me-2"></i>
+                    Gestión de Usuarios
+                </h5>
+                <button type="button" class="btn btn-primary" id="btn-new-user">
+                    <i class="bi bi-plus-circle me-2"></i>Nuevo Usuario
+                </button>
+            </div>
+            <div class="card-body">
+                <!-- Filtros y Búsqueda -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <input type="text" class="form-control search-box" id="search-users" placeholder="Buscar por nombre, usuario o email...">
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="filter-role">
+                            <option value="todos">Todos los roles</option>
+                            <option value="admin">Administradores</option>
+                            <option value="docente">Docentes</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="filter-status">
+                            <option value="todos">Todos los estados</option>
+                            <option value="activo">Activos</option>
+                            <option value="inactivo">Inactivos</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-secondary w-100" id="btn-clear-filters">
+                            <i class="bi bi-x-circle me-2"></i>Limpiar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tabla de Usuarios -->
+                <div class="table-responsive">
+                    <table class="table table-hover" id="users-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Usuario</th>
+                                <th>Nombre</th>
+                                <th>Email</th>
+                                <th>Rol</th>
+                                <th>Estado</th>
+                                <th>Último Acceso</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- Los usuarios se cargarán aquí -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Paginación -->
+                <nav aria-label="Paginación de usuarios">
+                    <ul class="pagination justify-content-center" id="pagination">
+                        <!-- La paginación se generará aquí -->
+                    </ul>
+                </nav>
+
+                <!-- Mensaje cuando no hay usuarios -->
+                <div id="no-users-message" class="text-center py-4 d-none">
+                    <i class="bi bi-people text-muted" style="font-size: 3rem;"></i>
+                    <p class="text-muted mt-2">No se encontraron usuarios</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Nuevo/Editar Usuario -->
+    <div class="modal fade" id="modal-user" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modal-user-title">Nuevo Usuario</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-user">
+                        <input type="hidden" id="user-id">
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="user-username" class="form-label">Usuario <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="user-username" required minlength="3" maxlength="50">
+                                <div class="form-text">Mínimo 3 caracteres, solo letras, números y guiones</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="user-email" class="form-label">Email <span class="text-danger">*</span></label>
+                                <input type="email" class="form-control" id="user-email" required>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="user-nombre" class="form-label">Nombre <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="user-nombre" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="user-apellido" class="form-label">Apellido <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="user-apellido" required>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="user-rol" class="form-label">Rol <span class="text-danger">*</span></label>
+                                <select class="form-select" id="user-rol" required>
+                                    <option value="docente">Docente</option>
+                                    <option value="admin">Administrador</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="user-estado" class="form-label">Estado <span class="text-danger">*</span></label>
+                                <select class="form-select" id="user-estado" required>
+                                    <option value="activo">Activo</option>
+                                    <option value="inactivo">Inactivo</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="password-section">
+                            <label for="user-password" class="form-label">
+                                Contraseña <span class="text-danger" id="password-required">*</span>
+                            </label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="user-password" minlength="6">
+                                <button type="button" class="btn btn-outline-secondary" id="toggle-user-password">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                <span id="password-help">Mínimo 6 caracteres</span>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-user">
+                        <span class="spinner-border spinner-border-sm d-none me-2" id="save-spinner"></span>
+                        Guardar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Cambiar Contraseña -->
+    <div class="modal fade" id="modal-change-password" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cambiar Contraseña</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="form-change-password">
+                        <div class="mb-3">
+                            <label for="current-password" class="form-label">Contraseña Actual</label>
+                            <input type="password" class="form-control" id="current-password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="new-password" class="form-label">Nueva Contraseña</label>
+                            <input type="password" class="form-control" id="new-password" required minlength="6">
+                            <div class="form-text">Mínimo 6 caracteres</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirm-password" class="form-label">Confirmar Nueva Contraseña</label>
+                            <input type="password" class="form-control" id="confirm-password" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-password">Cambiar Contraseña</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmación -->
+    <div class="modal fade" id="modal-confirm" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirm-title">Confirmar Acción</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="confirm-message">¿Está seguro de realizar esta acción?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" id="btn-confirm">Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>

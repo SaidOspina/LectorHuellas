@@ -1,6 +1,7 @@
 // Configuración y utilidades generales
 const API_URL = '/api';
 let socket;
+let currentUser = null;
 
 // Estado global de la aplicación
 const appState = {
@@ -9,7 +10,8 @@ const appState = {
     materiaSeleccionada: null,
     arduinoConectado: false,
     arduinoReady: false,
-    socketConnected: false
+    socketConnected: false,
+    authenticated: false
 };
 
 // Elementos del DOM
@@ -33,23 +35,109 @@ const elements = {
     alertsContainer: document.getElementById('alerts-container')
 };
 
+// Función helper para fetch con autenticación
+async function fetchWithAuth(url, options = {}) {
+    const token = localStorage.getItem('auth_token');
+    
+    if (!token) {
+        redirectToLogin();
+        return;
+    }
+    
+    const defaultOptions = {
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...options.headers
+        },
+        credentials: 'include'
+    };
+    
+    const response = await fetch(`${API_URL}${url}`, { ...defaultOptions, ...options });
+    
+    // Si el token expiró, redirigir al login
+    if (response.status === 401) {
+        localStorage.removeItem('auth_token');
+        redirectToLogin();
+        return;
+    }
+    
+    return response;
+}
+
+// Redirigir al login
+function redirectToLogin() {
+    window.location.href = '/login';
+}
+
+// Verificar autenticación
+async function checkAuth() {
+    const token = localStorage.getItem('auth_token');
+    
+    if (!token) {
+        redirectToLogin();
+        return false;
+    }
+    
+    try {
+        const response = await fetch(`${API_URL}/auth/me`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                currentUser = data.usuario;
+                appState.authenticated = true;
+                
+                // Verificar que sea docente (los admin deberían estar en /admin)
+                if (currentUser.rol !== 'docente') {
+                    if (currentUser.rol === 'admin') {
+                        window.location.href = '/admin';
+                    } else {
+                        showAlert('No tienes permisos para acceder a esta aplicación', 'danger');
+                    }
+                    return false;
+                }
+                
+                return true;
+            }
+        }
+        
+        throw new Error('Token inválido');
+        
+    } catch (error) {
+        console.error('Error de autenticación:', error);
+        localStorage.removeItem('auth_token');
+        redirectToLogin();
+        return false;
+    }
+}
+
 // Inicialización principal
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Iniciando aplicación...');
     
-    // 1. Inicializar Socket.io primero
+    // 1. Verificar autenticación primero
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) return;
+    
+    // 2. Inicializar Socket.io con autenticación
     initializeSocket();
     
-    // 2. Configurar eventos de navegación
+    // 3. Configurar eventos de navegación
     configureNavigation();
     
-    // 3. Verificar estado del Arduino
+    // 4. Verificar estado del Arduino
     checkArduinoStatus();
     
-    // 4. Configurar verificación periódica del Arduino
+    // 5. Configurar verificación periódica del Arduino
     setInterval(checkArduinoStatus, 10000); // Cada 10 segundos
     
-    // 5. Cargar datos iniciales después de un breve delay
+    // 6. Cargar datos iniciales después de un breve delay
     setTimeout(() => {
         loadInitialData();
         configureGlobalModals();
@@ -57,11 +145,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1000);
 });
 
-// ====== INICIALIZACIÓN DE SOCKET.IO ======
+// ====== INICIALIZACIÓN DE SOCKET.IO CON AUTENTICACIÓN ======
 function initializeSocket() {
-    console.log('🔌 Inicializando Socket.io...');
+    console.log('🔌 Inicializando Socket.io con autenticación...');
     
-    socket = io();
+    const token = localStorage.getItem('auth_token');
+    
+    socket = io({
+        auth: {
+            token: token
+        }
+    });
     
     // Hacer socket disponible globalmente de múltiples formas
     window.socket = socket;
@@ -85,7 +179,12 @@ function initializeSocket() {
 
     socket.on('connect_error', (error) => {
         console.error('Error de conexión Socket.io:', error);
-        showAlert('Error de conexión en tiempo real', 'warning');
+        if (error.message === 'Authentication error' || error.message === 'Invalid token') {
+            localStorage.removeItem('auth_token');
+            redirectToLogin();
+        } else {
+            showAlert('Error de conexión en tiempo real', 'warning');
+        }
     });
 
     // Eventos del Arduino
@@ -94,7 +193,7 @@ function initializeSocket() {
         updateArduinoStatus(data.connected, data.ready);
     });
     
-    // Eventos de huella digital - CORREGIDO
+    // Eventos de huella digital
     socket.on('fingerprint-scan', (data) => {
         console.log('👆 Huella escaneada:', data);
         handleFingerprintScan(data);
@@ -103,7 +202,6 @@ function initializeSocket() {
     // Eventos de progreso de huella (para registro de estudiantes)
     socket.on('huella-progress', (data) => {
         console.log('🔄 Progreso de huella:', data);
-        // Estos eventos se manejan específicamente en estudiantes.js
         if (window.registroHuellaEnProgreso) {
             console.log('Delegando evento huella-progress a estudiantes.js');
         }
@@ -111,7 +209,6 @@ function initializeSocket() {
     
     socket.on('huella-registered', (data) => {
         console.log('✅ Huella registrada:', data);
-        // Estos eventos se manejan específicamente en estudiantes.js
         if (window.registroHuellaEnProgreso) {
             console.log('Delegando evento huella-registered a estudiantes.js');
         }
@@ -119,7 +216,6 @@ function initializeSocket() {
     
     socket.on('huella-error', (data) => {
         console.log('❌ Error de huella:', data);
-        // Estos eventos se manejan específicamente en estudiantes.js
         if (window.registroHuellaEnProgreso) {
             console.log('Delegando evento huella-error a estudiantes.js');
         }
@@ -139,7 +235,6 @@ function initializeSocket() {
     
     socket.on('asistencia-actualizada', (data) => {
         console.log('✏️ Asistencia actualizada:', data);
-        // Recargar datos si estamos en la sección de asistencia
         if (!elements.asistenciaSection.classList.contains('d-none')) {
             if (typeof loadAsistenciaRecords === 'function') {
                 loadAsistenciaRecords();
@@ -149,7 +244,6 @@ function initializeSocket() {
     
     socket.on('asistencia-eliminada', (data) => {
         console.log('🗑️ Asistencia eliminada:', data);
-        // Recargar datos si estamos en la sección de asistencia
         if (!elements.asistenciaSection.classList.contains('d-none')) {
             if (typeof loadAsistenciaRecords === 'function') {
                 loadAsistenciaRecords();
@@ -238,10 +332,12 @@ function updateActiveNav(activeNavElement) {
 
 // ====== ESTADO DEL ARDUINO ======
 function checkArduinoStatus() {
-    fetch(`${API_URL}/arduino/status`)
-        .then(response => response.json())
+    fetchWithAuth('/arduino/status')
+        .then(response => response?.json())
         .then(data => {
-            updateArduinoStatus(data.connected, data.ready);
+            if (data) {
+                updateArduinoStatus(data.connected, data.ready);
+            }
         })
         .catch(error => {
             console.error('❌ Error al verificar estado del Arduino:', error);
@@ -272,7 +368,7 @@ function updateArduinoStatus(connected, ready = false) {
     }
 }
 
-// ====== MANEJO DE EVENTOS DE HUELLA - CORREGIDO ======
+// ====== MANEJO DE EVENTOS DE HUELLA ======
 function handleFingerprintScan(data) {
     const huellaID = data.id;
     console.log(`👆 Procesando huella escaneada ID: ${huellaID}`);
@@ -280,19 +376,17 @@ function handleFingerprintScan(data) {
     // 1. Verificar si hay un proceso de registro de huella en curso (estudiantes.js)
     if (window.registroHuellaEnProgreso) {
         console.log('🔄 Proceso de registro de huella en curso, delegando a estudiantes.js...');
-        return; // Los eventos específicos de huella se manejan en estudiantes.js
+        return;
     }
     
     // 2. Verificar si hay un proceso de asistencia por huella en curso
     if (window.asistenciaPorHuellaEnProgreso) {
         console.log('📝 Proceso de asistencia por huella en curso, procesando...');
         
-        // Llamar directamente a la función global
         if (typeof window.handleAsistenciaHuella === 'function') {
             window.handleAsistenciaHuella(huellaID);
         } else {
             console.error('❌ Función window.handleAsistenciaHuella no encontrada');
-            console.log('Funciones disponibles:', Object.keys(window).filter(key => key.includes('Asistencia')));
         }
         return;
     }
@@ -300,7 +394,6 @@ function handleFingerprintScan(data) {
     // 3. Si no hay procesos activos, mostrar información
     console.log('ℹ️ Huella detectada sin proceso activo');
     
-    // Intentar buscar el estudiante con esa huella para mostrar información
     if (appState.estudiantes && appState.estudiantes.length > 0) {
         const estudiante = appState.estudiantes.find(est => est.huellaID === huellaID);
         if (estudiante) {
@@ -317,14 +410,12 @@ function handleFingerprintScan(data) {
 function loadInitialData() {
     console.log('📊 Cargando datos iniciales...');
     
-    // Cargar materias primero
     if (typeof loadMaterias === 'function') {
         loadMaterias();
     } else {
         console.warn('⚠️ Función loadMaterias no está disponible');
     }
     
-    // Cargar estudiantes para tenerlos disponibles
     if (typeof loadEstudiantes === 'function') {
         setTimeout(() => {
             loadEstudiantes();
@@ -338,15 +429,12 @@ function loadInitialData() {
 function configureGlobalModals() {
     console.log('🔧 Configurando modales globales...');
     
-    // Modal de confirmación
     const modalConfirmacion = document.getElementById('modal-confirmacion');
     if (modalConfirmacion) {
         modalConfirmacion.addEventListener('hidden.bs.modal', () => {
-            // Limpiar datos cuando se cierre el modal
             document.getElementById('confirmacion-title').textContent = 'Confirmar acción';
             document.getElementById('confirmacion-mensaje').textContent = '¿Está seguro de realizar esta acción?';
             
-            // Quitar evento del botón de confirmar
             const btnConfirmar = document.getElementById('btn-confirmar');
             if (btnConfirmar) {
                 const newBtnConfirmar = btnConfirmar.cloneNode(true);
@@ -378,7 +466,6 @@ function showAlert(message, type = 'info', timeout = 5000) {
     
     elements.alertsContainer.insertAdjacentHTML('beforeend', alertHTML);
     
-    // Configurar temporizador para ocultar la alerta
     setTimeout(() => {
         const alertElement = document.getElementById(alertId);
         if (alertElement) {
@@ -437,7 +524,6 @@ function confirmAction(title, message, callback, btnText = 'Confirmar', btnType 
     
     const modalConfirmacion = new bootstrap.Modal(modalElement);
     
-    // Configurar contenido del modal
     document.getElementById('confirmacion-title').textContent = title;
     document.getElementById('confirmacion-mensaje').textContent = message;
     
@@ -446,7 +532,6 @@ function confirmAction(title, message, callback, btnText = 'Confirmar', btnType 
         btnConfirmar.textContent = btnText;
         btnConfirmar.className = `btn btn-${btnType}`;
         
-        // Remover listeners anteriores y agregar nuevo
         const newBtnConfirmar = btnConfirmar.cloneNode(true);
         btnConfirmar.parentNode.replaceChild(newBtnConfirmar, btnConfirmar);
         
@@ -472,36 +557,6 @@ function isSocketConnected() {
     return currentSocket && currentSocket.connected;
 }
 
-// ====== FUNCIONES DE DEBUG ======
-function debugAppState() {
-    console.log('=== DEBUG ESTADO APLICACIÓN ===');
-    console.log('Estado global:', appState);
-    console.log('Socket conectado:', isSocketConnected());
-    console.log('Variables globales importantes:', {
-        registroHuellaEnProgreso: window.registroHuellaEnProgreso,
-        asistenciaPorHuellaEnProgreso: window.asistenciaPorHuellaEnProgreso,
-        materiaAsistenciaActual: window.materiaAsistenciaActual
-    });
-    console.log('Funciones disponibles:', {
-        loadMaterias: typeof loadMaterias,
-        loadEstudiantes: typeof loadEstudiantes,
-        loadAsistenciaData: typeof loadAsistenciaData,
-        handleAsistenciaHuella: typeof window.handleAsistenciaHuella
-    });
-    console.log('===============================');
-}
-
-// ====== MANEJO DE ERRORES GLOBALES ======
-window.addEventListener('error', (event) => {
-    console.error('❌ Error global capturado:', event.error);
-    showAlert('Ha ocurrido un error inesperado. Revise la consola para más detalles.', 'danger');
-});
-
-window.addEventListener('unhandledrejection', (event) => {
-    console.error('❌ Promesa rechazada no manejada:', event.reason);
-    showAlert('Error de red o servidor. Intente nuevamente.', 'warning');
-});
-
 // ====== EXPORTACIÓN GLOBAL ======
 window.appUtils = {
     // Configuración
@@ -509,18 +564,19 @@ window.appUtils = {
     
     // Estado
     appState,
+    currentUser,
     
     // Funciones de utilidad
     showAlert,
     formatDate,
     confirmAction,
-    debugAppState,
+    fetchWithAuth,
     
     // Socket
     getSocket,
     isSocketConnected,
     
-    // Funciones de carga (se definen en otros archivos)
+    // Funciones de carga
     loadMaterias: function() {
         if (typeof loadMaterias === 'function') {
             loadMaterias();
@@ -570,7 +626,15 @@ window.addEventListener('load', () => {
     }, 1500);
 });
 
-// Exponer función de debug globalmente
-window.debugAppState = debugAppState;
+// ====== MANEJO DE ERRORES GLOBALES ======
+window.addEventListener('error', (event) => {
+    console.error('❌ Error global capturado:', event.error);
+    showAlert('Ha ocurrido un error inesperado. Revise la consola para más detalles.', 'danger');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('❌ Promesa rechazada no manejada:', event.reason);
+    showAlert('Error de red o servidor. Intente nuevamente.', 'warning');
+});
 
 console.log('📱 app.js cargado correctamente');

@@ -1,33 +1,50 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 require('dotenv').config();
+
+// Importar modelo de Usuario
+const Usuario = require('./models/usuario');
 
 // Importar rutas
 const materiasRoutes = require('./routes/materias');
 const estudiantesRoutes = require('./routes/estudiantes');
 const asistenciaRoutes = require('./routes/asistencia');
+const authRoutes = require('./routes/auth');
+const usuariosRoutes = require('./routes/usuarios');
+
+// Importar middleware de autenticación
+const { auth, requireDocente, optionalAuth } = require('./middleware/auth');
 
 // Inicializar express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configuración de middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Servir archivos estáticos desde 'frontend'
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// Rutas API
-app.use('/api/materias', materiasRoutes);
-app.use('/api/estudiantes', estudiantesRoutes);
-app.use('/api/asistencia', asistenciaRoutes);
+// Rutas de autenticación (públicas)
+app.use('/api/auth', authRoutes);
 
-// Variables globales para el Arduino
+// Rutas protegidas - requieren autenticación
+app.use('/api/materias', auth, requireDocente, materiasRoutes);
+app.use('/api/estudiantes', auth, requireDocente, estudiantesRoutes);
+app.use('/api/asistencia', auth, requireDocente, asistenciaRoutes);
+app.use('/api/usuarios', usuariosRoutes); // Ya tiene sus propios middlewares internos
+
+// Variables globales para el Arduino (sin cambios)
 let arduinoPort;
 let arduinoParser;
 let arduinoReady = false;
@@ -35,7 +52,7 @@ let commandQueue = [];
 let processingCommand = false;
 let waitingForScanResponse = false;
 
-// Función para procesar la cola de comandos
+// Función para procesar la cola de comandos (sin cambios)
 function processCommandQueue() {
   if (processingCommand || commandQueue.length === 0 || !arduinoReady) {
     return;
@@ -53,7 +70,6 @@ function processCommandQueue() {
     return;
   }
   
-  // Marcar si estamos esperando respuesta de scan
   if (command === 'scan') {
     waitingForScanResponse = true;
     console.log('🔍 Marcando como esperando respuesta de scan');
@@ -68,7 +84,6 @@ function processCommandQueue() {
     }
   });
   
-  // Timeout para comandos (más tiempo para enroll)
   const timeoutDuration = command.startsWith('enroll:') ? 120000 : 15000;
   setTimeout(() => {
     if (processingCommand) {
@@ -80,7 +95,7 @@ function processCommandQueue() {
   }, timeoutDuration);
 }
 
-// Función para inicializar la conexión con Arduino
+// Función para inicializar la conexión con Arduino (sin cambios)
 function initArduinoConnection() {
   const portPath = process.env.ARDUINO_PORT;
   
@@ -144,12 +159,11 @@ function initArduinoConnection() {
       }
     });
 
-    // PROCESAMIENTO DE DATOS MODIFICADO - Una sola respuesta por scan
+    // Procesamiento de datos del Arduino (sin cambios)
     arduinoParser.on('data', (data) => {
       const cleanData = data.trim();
       console.log(`Datos recibidos de Arduino: ${cleanData}`);
       
-      // Verificar si el Arduino está listo
       if (cleanData.includes('Sistema listo') || 
           cleanData.includes('Sin sensor - modo prueba') ||
           cleanData === 'READY' ||
@@ -171,17 +185,14 @@ function initArduinoConnection() {
           }
       }
       
-      // PROCESAR RESPUESTAS DE SCAN - SOLO UNA VEZ
       if (cleanData.startsWith('ID#')) {
           const fingerprintId = parseInt(cleanData.substring(3));
           console.log(`👆 Huella detectada con ID: ${fingerprintId}`);
           
-          // SOLO procesar si estamos esperando una respuesta de scan
           if (waitingForScanResponse) {
               console.log('✅ Procesando respuesta de scan válida');
-              waitingForScanResponse = false; // Marcar como procesada
+              waitingForScanResponse = false;
               
-              // Emitir evento de huella escaneada
               if (global.io) {
                   global.io.emit('fingerprint-scan', { 
                       id: fingerprintId,
@@ -189,7 +200,6 @@ function initArduinoConnection() {
                   });
               }
               
-              // Marcar comando como procesado
               processingCommand = false;
               processCommandQueue();
           } else {
@@ -197,16 +207,13 @@ function initArduinoConnection() {
           }
       }
       
-      // Procesar errores de escaneo
       else if (cleanData.startsWith('ERROR: No leido') || cleanData === 'ERROR: Sin sensor') {
           console.log('❌ Error en escaneo de huella:', cleanData);
           
-          // SOLO procesar si estamos esperando una respuesta de scan
           if (waitingForScanResponse) {
               console.log('✅ Procesando error de scan válido');
-              waitingForScanResponse = false; // Marcar como procesada
+              waitingForScanResponse = false;
               
-              // Emitir evento de error de huella
               if (global.io) {
                   global.io.emit('fingerprint-error', { 
                       message: cleanData.replace('ERROR:', '').trim(),
@@ -221,7 +228,6 @@ function initArduinoConnection() {
           }
       }
       
-      // Procesar comando de detener scan
       else if (cleanData === 'SCAN: Detenido' || cleanData === 'SCAN: No activo') {
           console.log('🛑 Scan detenido por Arduino');
           waitingForScanResponse = false;
@@ -229,7 +235,6 @@ function initArduinoConnection() {
           processCommandQueue();
       }
       
-      // Manejar mensajes de progreso del registro de huella
       else if (cleanData.includes('Registrando ID') || cleanData.startsWith('Registrando ID')) {
           console.log('🔄 Iniciando proceso de registro de huella');
           if (global.io) {
@@ -270,7 +275,6 @@ function initArduinoConnection() {
           }
       }
       
-      // Respuestas de éxito
       else if (cleanData.startsWith('SUCCESS:')) {
           console.log('✅ Comando ejecutado exitosamente:', cleanData);
           
@@ -292,7 +296,6 @@ function initArduinoConnection() {
           processCommandQueue();
       }
       
-      // Respuestas de error
       else if (cleanData.startsWith('ERROR:')) {
           console.error('❌ Error del Arduino:', cleanData);
           
@@ -306,7 +309,6 @@ function initArduinoConnection() {
           processCommandQueue();
       }
       
-      // Respuesta de conteo
       else if (cleanData.startsWith('COUNT:')) {
           const countMatch = cleanData.match(/COUNT:\s*(\d+)/);
           if (countMatch) {
@@ -320,7 +322,6 @@ function initArduinoConnection() {
           processCommandQueue();
       }
       
-      // Otras respuestas que indican fin de comando
       else if (cleanData.includes('BD limpia') ||
                cleanData === 'RESET: OK' ||
                cleanData.startsWith('STATUS:')) {
@@ -333,6 +334,7 @@ function initArduinoConnection() {
     console.error('Error al inicializar Arduino:', error.message);
   }
 }
+
 function stopCurrentScan() {
     if (waitingForScanResponse && arduinoPort && arduinoPort.isOpen) {
         console.log('🛑 Enviando comando para detener scan en progreso');
@@ -342,10 +344,8 @@ function stopCurrentScan() {
     }
 }
 
-
-
-// Ruta para enviar comandos a Arduino
-app.post('/api/arduino/command', (req, res) => {
+// Rutas de Arduino (protegidas - requieren autenticación de docente)
+app.post('/api/arduino/command', auth, requireDocente, (req, res) => {
     const { command } = req.body;
     
     console.log(`Recibido comando para Arduino: "${command}"`);
@@ -373,7 +373,6 @@ app.post('/api/arduino/command', (req, res) => {
         });
     }
     
-    // Si es un comando scan y ya hay uno en progreso, rechazar
     if (command.trim() === 'scan' && waitingForScanResponse) {
         console.log('⚠️ Comando scan rechazado - ya hay uno en progreso');
         return res.status(429).json({ 
@@ -382,11 +381,9 @@ app.post('/api/arduino/command', (req, res) => {
         });
     }
     
-    // Agregar comando a la cola
     commandQueue.push(command.trim());
     console.log(`Comando agregado a la cola. Cola actual: ${commandQueue.length} comandos`);
     
-    // Procesar cola
     processCommandQueue();
     
     res.json({ 
@@ -396,21 +393,19 @@ app.post('/api/arduino/command', (req, res) => {
     });
 });
 
-
-// Ruta para obtener estado del Arduino
-app.get('/api/arduino/status', (req, res) => {
+// Otras rutas de Arduino (protegidas)
+app.get('/api/arduino/status', auth, requireDocente, (req, res) => {
     const isConnected = arduinoPort && arduinoPort.isOpen;
     
     res.json({ 
         connected: isConnected,
         ready: arduinoReady,
         queueLength: commandQueue.length,
-        waitingForScan: waitingForScanResponse // NUEVO
+        waitingForScan: waitingForScanResponse
     });
 });
 
-// NUEVA RUTA: Detener scan en progreso
-app.post('/api/arduino/stop-scan', (req, res) => {
+app.post('/api/arduino/stop-scan', auth, requireDocente, (req, res) => {
     console.log('🛑 Solicitud para detener scan');
     
     if (!arduinoPort || !arduinoPort.isOpen) {
@@ -428,9 +423,7 @@ app.post('/api/arduino/stop-scan', (req, res) => {
     });
 });
 
-
-// Ruta para reiniciar Arduino
-app.post('/api/arduino/reset', (req, res) => {
+app.post('/api/arduino/reset', auth, requireDocente, (req, res) => {
     if (!arduinoPort || !arduinoPort.isOpen) {
         return res.status(500).json({ 
             success: false,
@@ -438,14 +431,12 @@ app.post('/api/arduino/reset', (req, res) => {
         });
     }
     
-    // Limpiar cola de comandos y estado
     commandQueue = [];
     processingCommand = false;
     arduinoReady = false;
     
     console.log('Enviando comando reset al Arduino...');
     
-    // Enviar comando de reset
     arduinoPort.write('reset\n', (err) => {
         if (err) {
             console.error('Error al enviar comando reset:', err);
@@ -462,8 +453,7 @@ app.post('/api/arduino/reset', (req, res) => {
     });
 });
 
-// Ruta para limpiar cola de comandos
-app.post('/api/arduino/clear-queue', (req, res) => {
+app.post('/api/arduino/clear-queue', auth, requireDocente, (req, res) => {
     const previousLength = commandQueue.length;
     commandQueue = [];
     processingCommand = false;
@@ -477,8 +467,28 @@ app.post('/api/arduino/clear-queue', (req, res) => {
     });
 });
 
-// Ruta para la página principal
-app.get('/', (req, res) => {
+// Rutas para servir diferentes interfaces según el rol
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/admin.html'));
+});
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/login.html'));
+});
+
+// Ruta para la página principal (docentes)
+app.get('/', optionalAuth, (req, res) => {
+  // Si no hay usuario autenticado, redirigir a login
+  if (!req.user) {
+    return res.redirect('/login');
+  }
+  
+  // Si es admin, redirigir al panel de admin
+  if (req.user.rol === 'admin') {
+    return res.redirect('/admin');
+  }
+  
+  // Si es docente, servir la aplicación principal
   res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
@@ -487,9 +497,22 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
+// Inicializar la base de datos y crear usuario admin por defecto
+async function initializeDatabase() {
+  try {
+    await Usuario.crearAdminDefault();
+    console.log('✅ Base de datos inicializada');
+  } catch (error) {
+    console.error('❌ Error al inicializar base de datos:', error);
+  }
+}
+
 // Iniciar el servidor
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`Servidor ejecutándose en http://localhost:${PORT}`);
+  
+  // Inicializar base de datos
+  await initializeDatabase();
   
   // Inicializar conexión con Arduino después de que el servidor esté listo
   setTimeout(() => {
@@ -498,11 +521,45 @@ const server = app.listen(PORT, () => {
 });
 
 // Configurar Socket.io para comunicación en tiempo real
-const io = require('socket.io')(server);
+const io = require('socket.io')(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
 global.io = io;
 
+// Middleware de autenticación para Socket.io
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token || 
+                  socket.handshake.headers.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      return next(new Error('No token provided'));
+    }
+    
+    const jwt = require('jsonwebtoken');
+    const { JWT_SECRET } = require('./middleware/auth');
+    
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const usuario = await Usuario.findById(decoded.id).select('-password');
+    
+    if (!usuario || usuario.estado !== 'activo') {
+      return next(new Error('Invalid token'));
+    }
+    
+    socket.user = usuario;
+    next();
+  } catch (error) {
+    next(new Error('Authentication error'));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log('Nuevo cliente conectado');
+  console.log(`Usuario conectado: ${socket.user.username} (${socket.user.rol})`);
   
   // Enviar estado actual del Arduino al cliente recién conectado
   socket.emit('arduino-status', { 
@@ -511,10 +568,9 @@ io.on('connection', (socket) => {
   });
   
   socket.on('disconnect', () => {
-    console.log('Cliente desconectado');
+    console.log(`Usuario desconectado: ${socket.user.username}`);
   });
   
-  // Manejar solicitudes de estado desde el cliente
   socket.on('request-arduino-status', () => {
     socket.emit('arduino-status', { 
       connected: global.arduinoConectado || false,
@@ -528,7 +584,6 @@ io.on('connection', (socket) => {
 process.on('SIGINT', () => {
   console.log('\nCerrando servidor...');
   
-  // Detener cualquier scan en progreso
   stopCurrentScan();
   
   if (arduinoPort && arduinoPort.isOpen) {
@@ -542,7 +597,6 @@ process.on('SIGINT', () => {
   });
 });
 
-// Manejar errores no capturados
 process.on('uncaughtException', (err) => {
   console.error('Error no capturado:', err);
 });
