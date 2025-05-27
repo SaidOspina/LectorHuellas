@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const Usuario = require('../models/usuario');
 
 // Clave secreta para JWT (en producción debe estar en variables de entorno)
-const JWT_SECRET = process.env.JWT_SECRET || 'tu_clave_secreta_muy_segura_aqui_cambiar_en_produccion';
+const JWT_SECRET = process.env.JWT_SECRET || '1151968';
 const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
 
 // Middleware de autenticación
