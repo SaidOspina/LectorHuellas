@@ -750,8 +750,12 @@ function iniciarRegistroAsistenciaPorHuella() {
         return;
     }
     
-    // Verificar si hay una materia seleccionada
-    if (!asistenciaElements.asistenciaModalMateria.value) {
+    // Verificar si hay una materia seleccionada - MÁS ROBUSTO
+    const materiaSeleccionada = asistenciaElements.asistenciaModalMateria ? 
+        asistenciaElements.asistenciaModalMateria.value : null;
+    
+    if (!materiaSeleccionada || materiaSeleccionada.trim() === '') {
+        console.log('❌ No hay materia seleccionada');
         if (asistenciaElements.huellaAsistenciaStatus) {
             asistenciaElements.huellaAsistenciaStatus.innerHTML = `
                 <div class="d-flex align-items-center justify-content-center text-warning">
@@ -760,23 +764,42 @@ function iniciarRegistroAsistenciaPorHuella() {
                 </div>
             `;
         }
+        window.appUtils.showAlert('⚠️ Debe seleccionar una materia antes de iniciar el escaneo', 'warning');
         return;
     }
     
-    // Guardar materia seleccionada en variables locales y globales
-    materiaAsistenciaActual = asistenciaElements.asistenciaModalMateria.value;
-    window.materiaAsistenciaActual = materiaAsistenciaActual;
+    // Verificar que la materia existe en el estado
+    const materiaEncontrada = window.appUtils.appState.materias.find(m => m._id === materiaSeleccionada);
+    if (!materiaEncontrada) {
+        console.log('❌ Materia no encontrada en el estado:', materiaSeleccionada);
+        window.appUtils.showAlert('❌ Error: Materia no válida. Recargue la página.', 'danger');
+        return;
+    }
+    
+    // Guardar materia seleccionada en variables locales y globales DE FORMA MÁS SEGURA
+    materiaAsistenciaActual = materiaSeleccionada;
+    window.materiaAsistenciaActual = materiaSeleccionada;
     
     // Marcar como en progreso en variables locales y globales
     asistenciaPorHuellaEnProgreso = true;
     window.asistenciaPorHuellaEnProgreso = true;
     modalAsistenciaAbierto = true;
     
-    console.log('🎯 Variables establecidas:', {
+    console.log('🎯 Variables establecidas correctamente:', {
         local: asistenciaPorHuellaEnProgreso,
         global: window.asistenciaPorHuellaEnProgreso,
-        materia: materiaAsistenciaActual
+        materiaLocal: materiaAsistenciaActual,
+        materiaGlobal: window.materiaAsistenciaActual,
+        materiaNombre: materiaEncontrada.nombre,
+        materiaCodigo: materiaEncontrada.codigo
     });
+    
+    // Mostrar información de la materia seleccionada
+    window.appUtils.showAlert(
+        `📚 Iniciando escaneo para: ${materiaEncontrada.nombre} (${materiaEncontrada.codigo})`, 
+        'info', 
+        3000
+    );
     
     // Iniciar ciclo de escaneo continuo
     iniciarCicloEscaneoContinuo();
@@ -1106,33 +1129,46 @@ function handleRegistroAsistenciaPorHuella(huellaID) {
         scanTimeoutId = null;
     }
     
+    // SOLUCIÓN: Obtener materia directamente del selector del modal
+    const materiaSeleccionada = asistenciaElements.asistenciaModalMateria ? 
+        asistenciaElements.asistenciaModalMateria.value : null;
+    
     console.log('Estado actual:', {
         local: asistenciaPorHuellaEnProgreso,
         global: window.asistenciaPorHuellaEnProgreso,
-        materia: materiaAsistenciaActual || window.materiaAsistenciaActual
+        materiaLocal: materiaAsistenciaActual,
+        materiaGlobal: window.materiaAsistenciaActual,
+        materiaSelector: materiaSeleccionada
     });
     
-    // Verificar estado usando variables locales o globales
+    // Verificar estado usando variables locales o globales Y el selector
     const enProgreso = asistenciaPorHuellaEnProgreso || window.asistenciaPorHuellaEnProgreso;
-    const materia = materiaAsistenciaActual || window.materiaAsistenciaActual;
+    const materia = materiaSeleccionada || materiaAsistenciaActual || window.materiaAsistenciaActual;
     
-    if (!enProgreso || !materia) {
+    if (!enProgreso) {
         console.log('❌ No hay proceso de asistencia por huella en curso');
+        return;
+    }
+    
+    if (!materia) {
+        console.log('❌ No hay materia seleccionada para el registro de asistencia');
+        actualizarEstadoEscaneo('error', 'Error: No hay materia seleccionada');
+        window.appUtils.showAlert('❌ Error: Debe seleccionar una materia primero', 'danger');
         return;
     }
     
     // Actualizar mensaje de estado
     actualizarEstadoEscaneo('procesando', `ID de huella: ${huellaID}`);
     
-    // Enviar solicitud de registro por huella
+    // Enviar solicitud de registro por huella con validación
     fetch(`${window.appUtils.API_URL}/asistencia/huella`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            huellaID,
-            materia
+            huellaID: parseInt(huellaID), // Asegurar que sea número
+            materiaId: materia // Cambiar 'materia' por 'materiaId' para coincidir con el backend
         })
     })
     .then(response => {
@@ -1431,6 +1467,8 @@ function toggleSelectAllEstudiantes() {
 
 // Guardar asistencia masiva
 function guardarAsistenciaMasiva() {
+    console.log('💾 Iniciando registro de asistencia masiva...');
+    
     // Validar formulario
     if (!asistenciaElements.asistenciaMasivaMateria.value) {
         window.appUtils.showAlert('Debe seleccionar una materia', 'warning');
@@ -1454,45 +1492,122 @@ function guardarAsistenciaMasiva() {
         return;
     }
     
-    // Preparar datos para la API
+    console.log('📊 Datos para asistencia masiva:', {
+        materia: asistenciaElements.asistenciaMasivaMateria.value,
+        fecha: asistenciaElements.asistenciaMasivaFecha.value,
+        estudiantes: estudiantesIds.length,
+        estudiantesIds: estudiantesIds
+    });
+    
+    const fechaFormateada = formatearFechaLocal(asistenciaElements.asistenciaMasivaFecha.value);
+
     const asistenciaData = {
         materia: asistenciaElements.asistenciaMasivaMateria.value,
         estudiantes: estudiantesIds,
-        fecha: asistenciaElements.asistenciaMasivaFecha.value,
+        fecha: fechaFormateada,
         presente: true
     };
+    // Deshabilitar botón mientras se procesa
+    const btnGuardar = asistenciaElements.btnGuardarAsistenciaMasiva;
+    if (btnGuardar) {
+        btnGuardar.disabled = true;
+        btnGuardar.innerHTML = `
+            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+            Procesando...
+        `;
+    }
     
-    // Enviar solicitud a la API
-    fetch(`${window.appUtils.API_URL}/asistencia/masiva`, {
+    // Enviar solicitud a la API con autenticación
+    window.appUtils.fetchWithAuth('/asistencia/masiva', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
         body: JSON.stringify(asistenciaData)
     })
     .then(response => {
+        if (!response) {
+            throw new Error('Error de conexión');
+        }
+        
         if (!response.ok) {
             return response.json().then(err => {
-                throw new Error(err.error || 'Error al registrar asistencia masiva');
+                throw new Error(err.error || `Error HTTP ${response.status}: ${response.statusText}`);
             });
         }
         return response.json();
     })
     .then(data => {
+        console.log('✅ Respuesta de asistencia masiva:', data);
+        
         // Cerrar modal
         asistenciaElements.modalAsistenciaMasiva.hide();
         
-        // Mostrar mensaje de éxito
-        const mensaje = `Asistencia registrada para ${estudiantesIds.length} estudiante(s)`;
-        window.appUtils.showAlert(mensaje, 'success');
+        // Mostrar mensaje de éxito detallado
+        let mensaje = data.message || `Asistencia procesada para ${estudiantesIds.length} estudiante(s)`;
+        
+        // Si hay información adicional, agregarla
+        if (data.resultados) {
+            const { nuevosRegistros, registrosActualizados, errores } = data.resultados;
+            if (nuevosRegistros > 0 || registrosActualizados > 0) {
+                mensaje += ` (${nuevosRegistros} nuevos, ${registrosActualizados} actualizados)`;
+            }
+            if (errores > 0) {
+                mensaje += ` - Advertencia: ${errores} error(es)`;
+            }
+        }
+        
+        window.appUtils.showAlert(mensaje, data.resultados?.errores > 0 ? 'warning' : 'success');
         
         // Recargar registros de asistencia
         cargarRegistrosAsistencia();
     })
     .catch(error => {
-        console.error('Error al registrar asistencia masiva:', error);
-        window.appUtils.showAlert(error.message, 'danger');
+        console.error('❌ Error al registrar asistencia masiva:', error);
+        
+        let errorMessage = 'Error al registrar asistencia masiva';
+        
+        // Personalizar mensaje según el tipo de error
+        if (error.message.includes('no encontrada')) {
+            errorMessage = 'Materia no encontrada o sin permisos';
+        } else if (error.message.includes('no están inscritos')) {
+            errorMessage = error.message; // Usar mensaje específico del servidor
+        } else if (error.message.includes('conexión')) {
+            errorMessage = 'Error de conexión. Verifique su conexión a internet.';
+        } else if (error.message !== 'Error al registrar asistencia masiva') {
+            errorMessage = error.message;
+        }
+        
+        window.appUtils.showAlert(errorMessage, 'danger');
+    })
+    .finally(() => {
+        // Restaurar botón
+        if (btnGuardar) {
+            btnGuardar.disabled = false;
+            btnGuardar.innerHTML = `
+                <i class="bi bi-save me-2"></i>Guardar Asistencia
+            `;
+        }
     });
+}
+
+// Función helper para manejar fechas correctamente
+function formatearFechaLocal(fechaInput) {
+    if (!fechaInput) return null;
+    
+    // Si ya es un objeto Date, usarlo directamente
+    if (fechaInput instanceof Date) {
+        return fechaInput.toISOString();
+    }
+    
+    // Si es una cadena de fecha (YYYY-MM-DD), crear fecha local
+    const [year, month, day] = fechaInput.split('-').map(Number);
+    const fechaLocal = new Date(year, month - 1, day, 12, 0, 0); // Usar mediodía para evitar problemas de zona horaria
+    
+    console.log('🕐 Fecha convertida:', {
+        original: fechaInput,
+        fechaLocal: fechaLocal.toISOString(),
+        fechaLocalString: fechaLocal.toLocaleDateString('es-CO')
+    });
+    
+    return fechaLocal.toISOString();
 }
 
 // Generar reporte de asistencia

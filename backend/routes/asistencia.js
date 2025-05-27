@@ -191,6 +191,185 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Registrar asistencia masiva - NUEVA RUTA
+router.post('/masiva', async (req, res) => {
+  try {
+    const { materia, estudiantes, fecha, presente = true } = req.body;
+    
+    // Validar datos de entrada
+    if (!materia || !estudiantes || !Array.isArray(estudiantes) || estudiantes.length === 0) {
+      return res.status(400).json({ 
+        error: 'Se requiere materia y al menos un estudiante seleccionado' 
+      });
+    }
+    
+    // Verificar que la materia pertenece al docente
+    const materiaDoc = await Materia.findOne({ 
+      _id: materia,
+      estado: 'activo',
+      creadoPor: req.user._id
+    });
+    
+    if (!materiaDoc) {
+      return res.status(404).json({ 
+        error: 'Materia no encontrada, está en papelera, o no le pertenece' 
+      });
+    }
+    
+    // Verificar que todos los estudiantes pertenecen al docente
+    const estudiantesDoc = await Estudiante.find({
+      _id: { $in: estudiantes },
+      creadoPor: req.user._id
+    });
+    
+    if (estudiantesDoc.length !== estudiantes.length) {
+      return res.status(400).json({ 
+        error: 'Uno o más estudiantes no existen o no le pertenecen' 
+      });
+    }
+    
+    // Verificar que todos los estudiantes están inscritos en la materia
+    const estudiantesNoInscritos = estudiantesDoc.filter(est => 
+      !est.materias.includes(materia)
+    );
+    
+    if (estudiantesNoInscritos.length > 0) {
+      return res.status(400).json({ 
+        error: `Los siguientes estudiantes no están inscritos en esta materia: ${estudiantesNoInscritos.map(e => e.nombre).join(', ')}` 
+      });
+    }
+    
+    // Determinar fecha de asistencia
+    const fechaAsistencia = fecha ? new Date(fecha) : new Date();
+    const fechaStr = fechaAsistencia.toISOString().split('T')[0];
+    const inicioDelDia = new Date(fechaStr + 'T00:00:00.000Z');
+    const finDelDia = new Date(fechaStr + 'T23:59:59.999Z');
+    
+    // Verificar asistencias existentes para esta fecha
+    const asistenciasExistentes = await Asistencia.find({
+      estudiante: { $in: estudiantes },
+      materia: materia,
+      registradoPor: req.user._id,
+      fecha: {
+        $gte: inicioDelDia,
+        $lte: finDelDia
+      }
+    }).populate('estudiante', 'nombre codigo');
+    
+    // Separar estudiantes que ya tienen asistencia vs los que no
+    const estudiantesConAsistencia = asistenciasExistentes.map(a => a.estudiante._id.toString());
+    const estudiantesSinAsistencia = estudiantes.filter(id => 
+      !estudiantesConAsistencia.includes(id.toString())
+    );
+    
+    const resultados = {
+      nuevosRegistros: [],
+      registrosActualizados: [],
+      errores: []
+    };
+    
+    // Registrar nuevas asistencias para estudiantes sin registro
+    if (estudiantesSinAsistencia.length > 0) {
+      const nuevasAsistencias = estudiantesSinAsistencia.map(estudianteId => ({
+        estudiante: estudianteId,
+        materia: materia,
+        presente,
+        fecha: fechaAsistencia,
+        registradoPor: req.user._id
+      }));
+      
+      try {
+        const asistenciasCreadas = await Asistencia.insertMany(nuevasAsistencias);
+        
+        // Poblar datos para respuesta
+        const asistenciasCompletas = await Asistencia.find({
+          _id: { $in: asistenciasCreadas.map(a => a._id) }
+        })
+        .populate('estudiante', 'nombre codigo programaAcademico')
+        .populate('materia', 'nombre codigo')
+        .populate('registradoPor', 'nombre apellido username');
+        
+        resultados.nuevosRegistros = asistenciasCompletas;
+      } catch (error) {
+        console.error('Error al crear asistencias masivas:', error);
+        resultados.errores.push('Error al crear algunos registros de asistencia');
+      }
+    }
+    
+    // Actualizar asistencias existentes si es necesario
+    if (asistenciasExistentes.length > 0) {
+      try {
+        // Actualizar todas las asistencias existentes con el nuevo estado
+        await Asistencia.updateMany(
+          {
+            _id: { $in: asistenciasExistentes.map(a => a._id) }
+          },
+          { 
+            presente: presente,
+            fecha: fechaAsistencia // Actualizar fecha también si cambió
+          }
+        );
+        
+        // Obtener las asistencias actualizadas
+        const asistenciasActualizadas = await Asistencia.find({
+          _id: { $in: asistenciasExistentes.map(a => a._id) }
+        })
+        .populate('estudiante', 'nombre codigo programaAcademico')
+        .populate('materia', 'nombre codigo')
+        .populate('registradoPor', 'nombre apellido username');
+        
+        resultados.registrosActualizados = asistenciasActualizadas;
+      } catch (error) {
+        console.error('Error al actualizar asistencias existentes:', error);
+        resultados.errores.push('Error al actualizar algunos registros existentes');
+      }
+    }
+    
+    // Preparar respuesta
+    const totalProcesados = resultados.nuevosRegistros.length + resultados.registrosActualizados.length;
+    const totalSolicitados = estudiantes.length;
+    
+    let mensaje = '';
+    if (resultados.nuevosRegistros.length > 0 && resultados.registrosActualizados.length > 0) {
+      mensaje = `Se registraron ${resultados.nuevosRegistros.length} nuevas asistencias y se actualizaron ${resultados.registrosActualizados.length} registros existentes`;
+    } else if (resultados.nuevosRegistros.length > 0) {
+      mensaje = `Se registraron ${resultados.nuevosRegistros.length} nuevas asistencias`;
+    } else if (resultados.registrosActualizados.length > 0) {
+      mensaje = `Se actualizaron ${resultados.registrosActualizados.length} registros de asistencia existentes`;
+    } else {
+      mensaje = 'No se procesaron registros de asistencia';
+    }
+    
+    // Si hay errores, incluir información sobre ellos
+    if (resultados.errores.length > 0) {
+      mensaje += `. Errores: ${resultados.errores.join(', ')}`;
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: mensaje,
+      resultados: {
+        totalSolicitados,
+        totalProcesados,
+        nuevosRegistros: resultados.nuevosRegistros.length,
+        registrosActualizados: resultados.registrosActualizados.length,
+        errores: resultados.errores.length
+      },
+      asistencias: [
+        ...resultados.nuevosRegistros,
+        ...resultados.registrosActualizados
+      ]
+    });
+    
+  } catch (error) {
+    console.error('Error en asistencia masiva:', error);
+    res.status(500).json({ 
+      error: 'Error interno del servidor al procesar asistencia masiva',
+      details: error.message 
+    });
+  }
+});
+
 // Registrar asistencia por huella dactilar - MODIFICADO: Verificar propiedad
 router.post('/huella', async (req, res) => {
   try {

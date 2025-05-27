@@ -154,10 +154,6 @@ function setupEventListeners() {
         elements.modalChangePassword.show();
     });
     
-    // Ir a la aplicación principal
-    elements.btnGoToApp.addEventListener('click', () => {
-        window.location.href = '/';
-    });
     
     // Nuevo usuario
     elements.btnNewUser.addEventListener('click', showNewUserModal);
