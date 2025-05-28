@@ -103,7 +103,7 @@ npm install
 Crear archivo `.env` en la carpeta `backend`:
 ```env
 # Base de datos MongoDB
-MONGODB_URI=mongodb+srv://usuario:password@cluster.mongodb.net/control_asistencia
+MONGODB_URI=link proporcionado por la aplicacion
 
 # Puerto del servidor
 PORT=3000
